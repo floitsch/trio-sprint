@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export STUDIO_PROPERTIES="$project_dir/.tooling/android-studio.properties"
+exec "$project_dir/toolw" "$project_dir/.tooling/android-studio/bin/studio" "$project_dir"

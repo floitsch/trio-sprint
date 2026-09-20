@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+set -eu
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export ANDROID_HOME="$project_dir/.tooling/android-sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export GRADLE_USER_HOME="$project_dir/.tooling/gradle-home"
+if [ -x "$project_dir/.tooling/android-studio/jbr/bin/java" ]; then
+  export JAVA_HOME="$project_dir/.tooling/android-studio/jbr"
+else
+  export JAVA_HOME="$project_dir/.tooling/jdk"
+fi
+export PUB_CACHE="$project_dir/.tooling/pub-cache"
+export XDG_CONFIG_HOME="$project_dir/.tooling/config"
+export ANDROID_USER_HOME="$project_dir/.tooling/android-user"
+if [ -z "${CHROME_EXECUTABLE:-}" ] && [ -x /opt/google/chrome/chrome ]; then
+  export CHROME_EXECUTABLE=/opt/google/chrome/chrome
+fi
+export CI=true
+export FLUTTER_SUPPRESS_ANALYTICS=true
+export DASH__SUPPRESS_ANALYTICS=true
+export ANALYZER_STATE_LOCATION_OVERRIDE="$project_dir/.tooling/dart-analysis"
+export PATH="$JAVA_HOME/bin:$project_dir/.tooling/flutter/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+exec "$@"
