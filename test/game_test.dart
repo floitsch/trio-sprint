@@ -1,7 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:set_sprint/game.dart';
+import 'package:trio_sprint/game.dart';
 
 void main() {
   test('all 81 cards are unique and there are exactly 1080 sets', () {

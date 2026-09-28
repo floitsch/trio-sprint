@@ -1,4 +1,4 @@
-name: set_sprint
+name: trio_sprint
 description: A quick five-set sprint against the clock.
 publish_to: none
 version: 1.0.0+1

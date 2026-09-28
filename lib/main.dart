@@ -6,14 +6,14 @@ import 'package:flutter/services.dart';
 import 'card_view.dart';
 import 'game.dart';
 
-void main() => runApp(const SetApp());
+void main() => runApp(const TrioSprintApp());
 
-class SetApp extends StatelessWidget {
-  const SetApp({super.key});
+class TrioSprintApp extends StatelessWidget {
+  const TrioSprintApp({super.key});
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Set Sprint',
+    title: 'Trio Sprint',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
@@ -210,7 +210,7 @@ class _GameScreenState extends State<GameScreen> {
                   child: Row(
                     children: [
                       const Text(
-                        'set',
+                        'trio',
                         style: TextStyle(
                           fontSize: 38,
                           fontWeight: FontWeight.w900,
@@ -340,6 +340,12 @@ class _GameScreenState extends State<GameScreen> {
     ),
     const SizedBox(height: 10),
     TextButton(onPressed: showRules, child: const Text('How to play')),
+    const SizedBox(height: 16),
+    const Text(
+      'Unofficial game. Not affiliated with PlayMonster or the SET® card game.',
+      textAlign: TextAlign.center,
+      style: TextStyle(fontSize: 11, color: Color(0xFF68717B)),
+    ),
     const SizedBox(height: 24),
   ]);
 

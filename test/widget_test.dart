@@ -1,9 +1,9 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:set_sprint/card_view.dart';
-import 'package:set_sprint/game.dart';
-import 'package:set_sprint/main.dart';
+import 'package:trio_sprint/card_view.dart';
+import 'package:trio_sprint/game.dart';
+import 'package:trio_sprint/main.dart';
 
 void main() {
   testWidgets('three moving fingers can select a set simultaneously', (
@@ -13,7 +13,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(const SetApp());
+    await tester.pumpWidget(const TrioSprintApp());
     await tester.tap(find.text('Start run'));
     await tester.pump(const Duration(seconds: 2));
     final cards = tester
@@ -50,7 +50,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(const SetApp());
+    await tester.pumpWidget(const TrioSprintApp());
     await tester.tap(find.text('Start run'));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
@@ -98,7 +98,7 @@ void main() {
   testWidgets('two-second countdown, five sets, frozen result, quick replay', (
     tester,
   ) async {
-    await tester.pumpWidget(const SetApp());
+    await tester.pumpWidget(const TrioSprintApp());
     await tester.tap(find.text('Start run'));
     await tester.pump();
     expect(find.text('2'), findsOneWidget);
@@ -143,7 +143,7 @@ void main() {
   testWidgets('restarting during countdown cancels the previous start', (
     tester,
   ) async {
-    await tester.pumpWidget(const SetApp());
+    await tester.pumpWidget(const TrioSprintApp());
     await tester.tap(find.text('Start run'));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
@@ -168,7 +168,7 @@ void main() {
       ]) {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1;
-        await tester.pumpWidget(const SetApp());
+        await tester.pumpWidget(const TrioSprintApp());
         expect(tester.takeException(), isNull);
         expectPortraitCards(tester);
         await tester.ensureVisible(find.text('Start run'));

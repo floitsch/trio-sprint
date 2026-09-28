@@ -1,4 +1,4 @@
-package org.toit.set_sprint
+package org.toit.trio_sprint
 
 import io.flutter.embedding.android.FlutterActivity
 
