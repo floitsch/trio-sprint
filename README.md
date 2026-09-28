@@ -76,3 +76,9 @@ The release workflow signs the APK with the key in the `ANDROID_KEYSTORE`
 repository secrets. Android only installs updates signed with the same key, so
 keep a backup of it. Without `android/key.properties`, release builds use the
 debug keys.
+
+## License
+
+The code is available under the [BSD Zero Clause License](LICENSE). The Roboto
+fonts in `assets/fonts/` are under the Apache License 2.0; see
+`assets/fonts/LICENSE.txt`.
