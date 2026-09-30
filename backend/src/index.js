@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Toit contributors.
 import { DurableObject } from 'cloudflare:workers';
 import { SeededRun, seededBoards, validName, validPlayer, validSeed, validateScore } from './game.js';
-import { registerDevice, deviceCount, linkDevices, scoreQuery, insertScoreQuery, existingScoreQuery } from './players.js';
+import { registerDevice, deviceCount, pairingCode, linkDevices, scoreQuery, insertScoreQuery, existingScoreQuery } from './players.js';
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
@@ -33,6 +33,12 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers });
     const url = new URL(request.url);
     try {
+      if (url.pathname === '/players/pairing' && request.method === 'POST') {
+        const body = await readJson(request);
+        if (!validPlayer(body?.player)) return json({ error: 'Invalid player' }, 400);
+        const code = await pairingCode(env.DB, body.player);
+        return json({ code, devices: await deviceCount(env.DB, body.player) });
+      }
       if (url.pathname === '/players/code' && request.method === 'POST') {
         const body = await readJson(request);
         if (!validPlayer(body?.player)) return json({ error: 'Invalid player' }, 400);

@@ -1,44 +1,73 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import 'data.dart';
 
 class DevicesScreen extends StatefulWidget {
-  const DevicesScreen({super.key, required this.player});
+  const DevicesScreen({super.key, required this.player, this.initialCode});
   final PlayerData player;
+  final String? initialCode;
 
   @override
   State<DevicesScreen> createState() => _DevicesScreenState();
 }
 
 class _DevicesScreenState extends State<DevicesScreen> {
-  final ownCode = TextEditingController();
-  final otherCode = TextEditingController();
+  late final otherCode = TextEditingController(text: widget.initialCode);
+  String ownCode = '';
   bool loading = true;
   bool merging = false;
+  bool linked = false;
   int devices = 1;
   String message = '';
+  Timer? refreshTimer;
+  bool refreshing = false;
 
   @override
   void initState() {
     super.initState();
     load();
+    refreshTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => refreshCount(),
+    );
+  }
+
+  Future<void> refreshCount() async {
+    if (loading || merging || refreshing || ownCode.isEmpty) return;
+    refreshing = true;
+    try {
+      final result = await OnlineApi().request(
+        '/players/code',
+        body: {'player': widget.player.player},
+      );
+      final count = result['devices'] as int;
+      if (mounted && count != devices) {
+        setState(() {
+          devices = count;
+          message = 'Devices linked. Your scores now count as one player.';
+        });
+      }
+    } catch (_) {
+      // A brief loss of connectivity should not interrupt entering a code.
+    } finally {
+      refreshing = false;
+    }
   }
 
   Future<void> load() async {
     setState(() => loading = true);
     try {
       final result = await OnlineApi().request(
-        '/players/code',
+        '/players/pairing',
         body: {'player': widget.player.player},
       );
       if (!mounted) return;
-      final code = result['code'] as String;
-      ownCode.text = List.generate(
-        6,
-        (i) => code.substring(i * 8, (i + 1) * 8),
-      ).join('-');
       setState(() {
+        ownCode = result['code'] as String;
         devices = result['devices'] as int;
         message = '';
       });
@@ -57,11 +86,17 @@ class _DevicesScreenState extends State<DevicesScreen> {
     final target = normalizeDeviceCode(otherCode.text);
     if (target == null) {
       setState(
-        () =>
-            message = 'Paste the complete device code from your other device.',
+        () => message = 'Enter the six-character code from your other device.',
       );
       return;
     }
+    if (target == ownCode || target == widget.player.player) {
+      setState(
+        () => message = 'That is this device’s code. Enter the code from your other device.',
+      );
+      return;
+    }
+    FocusScope.of(context).unfocus();
     setState(() {
       merging = true;
       message = '';
@@ -74,11 +109,10 @@ class _DevicesScreenState extends State<DevicesScreen> {
       if (!mounted) return;
       setState(() {
         devices = result['devices'] as int;
-        message = target == widget.player.player
-            ? 'That is this device’s code. Paste the code from your other device.'
-            : 'Devices linked. Your existing and future scores now count as one player.';
+        linked = true;
+        message = '';
       });
-      if (target != widget.player.player) otherCode.clear();
+      otherCode.clear();
     } catch (error) {
       if (mounted) {
         setState(
@@ -91,18 +125,17 @@ class _DevicesScreenState extends State<DevicesScreen> {
     }
   }
 
-  Future<void> copy() async {
+  Future<void> copy(String text) async {
     try {
-      await Clipboard.setData(ClipboardData(text: ownCode.text));
+      await Clipboard.setData(ClipboardData(text: text));
       if (mounted) {
-        setState(
-          () => message = 'Device code copied. Paste it on your other device.',
-        );
+        setState(() => message = 'Copied. Open it on your other device.');
       }
     } catch (_) {
       if (mounted) {
         setState(
-          () => message = 'Could not copy. Select and copy the code above.',
+          () => message =
+              'Could not copy. You can type the six-character code instead.',
         );
       }
     }
@@ -110,10 +143,37 @@ class _DevicesScreenState extends State<DevicesScreen> {
 
   @override
   void dispose() {
-    ownCode.dispose();
+    refreshTimer?.cancel();
     otherCode.dispose();
     super.dispose();
   }
+
+  Widget enterCode() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      TextField(
+        controller: otherCode,
+        enabled: !merging,
+        autocorrect: false,
+        enableSuggestions: false,
+        textCapitalization: TextCapitalization.characters,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) {
+          if (!loading && !merging) merge();
+        },
+        decoration: const InputDecoration(
+          labelText: 'Code from your other device',
+          hintText: 'ABC 234',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      const SizedBox(height: 12),
+      FilledButton(
+        onPressed: loading || merging ? null : merge,
+        child: Text(merging ? 'Linking…' : 'Link this device'),
+      ),
+    ],
+  );
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -133,68 +193,90 @@ class _DevicesScreenState extends State<DevicesScreen> {
         child: ListView(
           padding: const EdgeInsets.all(22),
           children: [
-            const Text(
-              'Use one leaderboard identity on all your devices.',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            Text(
+              linked
+                  ? 'Devices linked'
+                  : widget.initialCode == null
+                  ? 'One player, all your devices.'
+                  : 'Link this device to your other one?',
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
-            const Text(
-              'On one device, copy its code. On the other, open Link devices and paste that code below. No login needed.',
+            Text(
+              linked
+                  ? 'Your existing and future leaderboard scores now count as one player.'
+                  : widget.initialCode == null
+                  ? 'Scan the QR code with your other device, or enter this short code in Link devices there.'
+                  : 'The code is filled in. Tap Link this device to combine your leaderboard scores.',
             ),
             if (devices > 1)
               Padding(
-                padding: const EdgeInsets.only(top: 16),
+                padding: const EdgeInsets.only(top: 12),
                 child: Text(
                   '$devices devices linked',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
+            if (linked)
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Done'),
+              )
+            else if (widget.initialCode != null)
+              enterCode(),
+            if (message.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Semantics(liveRegion: true, child: Text(message)),
+              ),
             if (loading)
               const Center(child: CircularProgressIndicator())
-            else if (ownCode.text.isNotEmpty) ...[
-              TextField(
-                controller: ownCode,
-                readOnly: true,
-                minLines: 2,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'This device’s code',
+            else if (ownCode.isNotEmpty) ...[
+              if (widget.initialCode != null) const SizedBox(height: 20),
+              const Text('This device’s code', textAlign: TextAlign.center),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SelectableText(
+                    '${ownCode.substring(0, 3)} ${ownCode.substring(3)}',
+                    key: const ValueKey('pairing-code'),
+                    style: const TextStyle(
+                      fontSize: 32,
+                      letterSpacing: 3,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => copy(ownCode),
+                    tooltip: 'Copy device code',
+                    icon: const Icon(Icons.copy),
+                  ),
+                ],
+              ),
+              Center(
+                child: QrImageView(
+                  key: const ValueKey('pairing-qr'),
+                  data: shareLink('link', ownCode),
+                  size: 200,
+                  padding: const EdgeInsets.all(16),
+                  backgroundColor: Colors.white,
+                  semanticsLabel: 'Scan to link this device',
                 ),
               ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: copy,
-                icon: const Icon(Icons.copy),
-                label: const Text('Copy device code'),
+              TextButton.icon(
+                onPressed: () => copy(shareLink('link', ownCode)),
+                icon: const Icon(Icons.link),
+                label: const Text('Copy pairing link'),
               ),
             ],
-            const SizedBox(height: 24),
-            TextField(
-              controller: otherCode,
-              enabled: !merging,
-              autocorrect: false,
-              enableSuggestions: false,
-              minLines: 2,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Code from your other device',
-                hintText: 'Paste device code',
-              ),
-            ),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: loading || merging ? null : merge,
-              child: Text(
-                merging ? 'Linking…' : 'Merge leaderboard identities',
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (message.isNotEmpty)
-              Semantics(liveRegion: true, child: Text(message)),
+            if (widget.initialCode == null && !linked) ...[
+              const SizedBox(height: 12),
+              enterCode(),
+            ],
             const SizedBox(height: 20),
             const Text(
-              'Existing scores are combined. “Only each player’s best” treats linked devices as one person. If both devices submitted the same seed, the first submission counts.',
+              'Existing and future leaderboard scores count as one player. If both devices submitted the same seed, the first submission counts.',
             ),
             const SizedBox(height: 12),
             const Text(

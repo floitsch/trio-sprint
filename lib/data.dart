@@ -16,8 +16,12 @@ String randomId() => List.generate(
 ).join();
 
 String? normalizeDeviceCode(String value) {
-  final code = value.toLowerCase().replaceAll(RegExp(r'[\s-]'), '');
-  return RegExp(r'^[a-f0-9]{48}$').hasMatch(code) ? code : null;
+  final trimmed = value.trim();
+  final raw = Uri.tryParse(trimmed)?.queryParameters['link'] ?? trimmed;
+  final code = raw.replaceAll(RegExp(r'[\s-]'), '').toUpperCase();
+  if (RegExp(r'^[A-HJ-NP-Z2-9]{6}$').hasMatch(code)) return code;
+  // Retain support for codes copied before short pairing codes were introduced.
+  return RegExp(r'^[A-F0-9]{48}$').hasMatch(code) ? code.toLowerCase() : null;
 }
 
 class PlayerData {

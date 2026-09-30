@@ -16,6 +16,7 @@ async function post(path, body, status = 200) {
   return result;
 }
 const code = player => post('/players/code', {player});
+const pairing = player => post('/players/pairing', {player});
 const merge = (player, target) => post('/players/merge', {player, target});
 async function scores(query) {
   const response = await fetch(base + '/scores?' + new URLSearchParams(query));
@@ -43,6 +44,27 @@ test('codes are stable, validated, and must come from an existing device', async
   assert.deepEqual(await merge(a, a), {ok: true, devices: 1});
 });
 
+test('short codes are unique, stable during concurrent requests, and survive group merges', async () => {
+  const [a, b, c] = Array.from({length: 3}, player);
+  const responses = await Promise.all(Array.from({length: 8}, () => pairing(a)));
+  const short = responses[0].code;
+  assert.match(short, /^[A-HJ-NP-Z2-9]{6}$/);
+  for (const response of responses) assert.deepEqual(response, {code: short, devices: 1});
+  const bCode = (await pairing(b)).code;
+  assert.notEqual(short, bCode);
+  const formatted = short.slice(0, 3).toLowerCase() + ' - ' + short.slice(3).toLowerCase();
+  assert.deepEqual(await merge(b, formatted), {ok: true, devices: 2});
+  assert.deepEqual(await pairing(a), {code: short, devices: 2});
+  assert.deepEqual(await pairing(b), {code: bCode, devices: 2});
+  assert.deepEqual(await merge(c, bCode), {ok: true, devices: 3});
+  assert.equal((await code(a)).devices, 3);
+  await post('/players/pairing', {player: 'bad'}, 400);
+  await post('/players/merge', {player: a, target: 'ABC01I'}, 400);
+  // Find a valid unused code without assuming any particular database contents.
+  const missing = 'ZZZ' + randomBytes(2).toString('hex').slice(0, 3).replace(/[01]/g, 'Z').toUpperCase();
+  await post('/players/merge', {player: a, target: missing}, 404);
+});
+
 test('linking combines existing and future scores and keeps the earliest seed submission', async () => {
   const a = player(), b = player(), shared = seed(), separate = seed();
   const name = 'Link ' + randomBytes(5).toString('hex');
@@ -51,9 +73,9 @@ test('linking combines existing and future scores and keeps the earliest seed su
   await post('/scores', score(b, shared, name, 1));
   await post('/scores', score(b, separate, name, 3));
   assert.equal((await scores({seed: shared})).length, 2);
-  await code(a);
+  const short = (await pairing(a)).code;
   // The source need not have opened Link devices beforehand.
-  assert.deepEqual(await merge(b, a), {ok: true, devices: 2});
+  assert.deepEqual(await merge(b, short), {ok: true, devices: 2});
   for (const unique of ['true', 'false']) {
     const rows = await scores({seed: shared, unique});
     assert.equal(rows.length, 1);

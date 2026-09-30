@@ -8,6 +8,20 @@ import 'package:trio_sprint/data.dart';
 import 'package:trio_sprint/game.dart';
 
 void main() {
+  test('short pairing codes and scanned links normalize to the same code', () {
+    for (final value in [
+      'ABC234',
+      'abc234',
+      ' abc 234 ',
+      'abc-234',
+      'https://trio-sprint.floitsch.workers.dev/?link=abc234',
+    ]) {
+      expect(normalizeDeviceCode(value), 'ABC234');
+    }
+    for (final value in ['ABC01I', 'ABC23', 'ABC2345', '?link=nope']) {
+      expect(normalizeDeviceCode(value), isNull);
+    }
+  });
   test('device codes accept copied grouping, whitespace and uppercase', () {
     const code = '12345678abcdef0012345678abcdef0012345678abcdef00';
     expect(normalizeDeviceCode(code), code);

@@ -33,8 +33,12 @@ Leaving the app does not pause the stopwatch.
   Deployments preserve the D1 database and its existing scores.
   Nicknames and random player IDs are remembered on each device, without login.
   First-attempt personal bests also persist locally.
-- **Link devices:** copy the code under **Link devices** on one machine and
-  paste it into the same screen on another. Their existing and future scores
+- **Link devices:** open **Link devices** on your computer and scan its QR code
+  with your phone, then tap **Link this device**. Or type the six-character code
+  into **Link devices** on the other machine; no cross-device clipboard needed.
+  Pairing links open the linking screen with the code already filled in.
+  Codes stay the same between visits, and old long codes still work.
+  Their existing and future scores
   then count as one player, including for **Only each player’s best**. You can
   link more devices using any already-linked device's code. Original score rows
   are preserved; if both devices submitted a seed, the earliest submission counts.

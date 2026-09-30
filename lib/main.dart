@@ -103,8 +103,19 @@ class _GameScreenState extends State<GameScreen> {
         player = loaded;
         if (loaded.best != null) best = Duration(milliseconds: loaded.best!);
       });
+      final link = normalizeDeviceCode(Uri.base.queryParameters['link'] ?? '');
       final room = Uri.base.queryParameters['room'];
-      if (room != null && RegExp(r'^[A-Z0-9]{6}$').hasMatch(room)) {
+      if (link != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => DevicesScreen(player: loaded, initialCode: link),
+            ),
+          );
+        });
+      } else if (room != null && RegExp(r'^[A-Z0-9]{6}$').hasMatch(room)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) openRace(room: room);
         });

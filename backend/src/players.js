@@ -13,12 +13,40 @@ export async function deviceCount(db, player) {
   return row.count;
 }
 
+export async function pairingCode(db, player) {
+  await registerDevice(db, player);
+  const find = () => db.prepare('SELECT code FROM pairing_codes WHERE player = ?').bind(player).first();
+  const existing = await find();
+  if (existing) return existing.code;
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const code = Array.from(crypto.getRandomValues(new Uint8Array(6)), b => alphabet[b % alphabet.length]).join('');
+    // Both unique constraints matter: retry a code collision, but reuse a code
+    // created concurrently for this same device.
+    await db.prepare('INSERT OR IGNORE INTO pairing_codes (player, code) VALUES (?, ?)')
+      .bind(player, code).run();
+    const created = await find();
+    if (created) return created.code;
+  }
+  throw new Error('Could not allocate pairing code');
+}
+
 export async function linkDevices(db, body) {
-  if (!body || !validPlayer(body.player) || !validPlayer(body.target))
+  if (!body || !validPlayer(body.player) || typeof body.target !== 'string')
     return {error: 'Invalid device code', status: 400};
-  const target = await db.prepare('SELECT player FROM player_links WHERE player = ?')
-    .bind(body.target).first();
-  if (!target) return {error: 'Device code not found. Copy the code from Link devices on the other device.', status: 404};
+  const value = body.target.replace(/[\s-]/g, '');
+  let target;
+  if (/^[A-HJ-NP-Z2-9]{6}$/i.test(value)) {
+    target = await db.prepare('SELECT player FROM pairing_codes WHERE code = ?')
+      .bind(value.toUpperCase()).first();
+  } else if (validPlayer(value.toLowerCase())) {
+    // Cached older apps and previously copied long codes keep working.
+    target = await db.prepare('SELECT player FROM player_links WHERE player = ?')
+      .bind(value.toLowerCase()).first();
+  } else {
+    return {error: 'Invalid device code', status: 400};
+  }
+  if (!target) return {error: 'Code not found. Check the code shown in Link devices on your other device.', status: 404};
   await registerDevice(db, body.player);
   // Resolve both groups within the same atomic statement. This also handles
   // simultaneous merges and codes copied before their device was linked.
@@ -28,7 +56,7 @@ export async function linkDevices(db, body) {
       WHERE source.player = ? AND target.player = ?
     ) UPDATE player_links SET identity = (SELECT target FROM groups)
       WHERE identity = (SELECT source FROM groups)`)
-    .bind(body.player, body.target).run();
+    .bind(body.player, target.player).run();
   return {ok: true, devices: await deviceCount(db, body.player)};
 }
 
