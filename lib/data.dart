@@ -124,7 +124,7 @@ class OnlineApi {
 String shareLink(String key, String value) {
   final base = Uri.base;
   final web = base.scheme == 'http' || base.scheme == 'https';
-  return (web ? base : Uri.parse('https://floitsch.github.io/trio-sprint/'))
+  return (web ? base : Uri.parse('https://trio-sprint.floitsch.workers.dev/'))
       .replace(queryParameters: {key: value}, fragment: '')
       .toString();
 }

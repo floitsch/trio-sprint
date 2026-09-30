@@ -32,6 +32,8 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== ROOT.origin || !url.pathname.startsWith(ROOT.pathname)) return;
+  const relative = url.pathname.slice(ROOT.pathname.length);
+  if (relative === 'scores' || relative === 'rooms' || relative.startsWith('rooms/')) return;
   // Cache app assets only. Score requests and room connections stay online.
   const asset = event.request.mode === 'navigate'
     ? new URL('index.html', ROOT).href : url.origin + url.pathname;

@@ -1,0 +1,49 @@
+name: Cloudflare
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build web --no-web-resources-cdn --dart-define=API_URL=${{ vars.API_URL }}
+      - run: python3 tool/build_web.py
+      - run: npm ci
+        working-directory: backend
+      - run: npm test
+        working-directory: backend
+      - name: Deploy app and API
+        working-directory: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo '::warning::Automatic deployment skipped: add the CLOUDFLARE_API_TOKEN repository secret. The existing deployed site is unchanged.'
+            exit 0
+          fi
+          npx wrangler d1 migrations apply trio-sprint-scores --remote
+          npm run deploy

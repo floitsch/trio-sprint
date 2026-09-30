@@ -1,6 +1,6 @@
 # Trio Sprint
 
-**[Play in the browser](https://floitsch.github.io/trio-sprint/)** ·
+**[Play in the browser](https://trio-sprint.floitsch.workers.dev/)** ·
 **[Download for Android](https://github.com/floitsch/trio-sprint/releases/latest/download/trio-sprint.apk)**
 
 A Flutter pattern game: find **five sets** with a two-second countdown before
@@ -91,7 +91,8 @@ countdown and stopwatch.
 
 ## Release
 
-Every push to `main` is checked, built and deployed to GitHub Pages. To publish
+Every push to `main` is checked, built and deployed to Cloudflare.
+GitHub Pages serves a redirect that preserves seed and room links. To publish
 a new Android APK, bump `version` in `pubspec.yaml` (including the `+build`
 number, which Android uses to recognize updates) and push a matching tag:
 
@@ -114,16 +115,24 @@ fonts in `assets/fonts/` are under the Apache License 2.0; see
 
 ## Cloudflare backend
 
-Production API: **https://trio-sprint.floitsch.workers.dev**. The GitHub
+Production app and API: **https://trio-sprint.floitsch.workers.dev**. The GitHub
 repository variable `API_URL` points to this Worker.
 
-The Flutter website may stay on GitHub Pages. The backend uses one Worker,
-D1 for scores, and a SQLite-backed Durable Object per race room. No secrets go
+One Cloudflare Worker serves the Flutter assets and API together, with
+D1 for scores and a SQLite-backed Durable Object per race room. No secrets go
 into the app. `API_URL` is a public base URL without a trailing slash. If omitted,
 solo/training still work and online actions explain that they are unconfigured.
 
-To update the existing backend, run `npm ci` and `npm run deploy` in `backend/`.
+To deploy locally, first build Flutter for the root path and generate its offline
+worker using the web build commands above. Then run `npm ci` and `npm run deploy`
+in `backend/`. This publishes both the website and API in one deployment.
 Apply any new D1 migrations with `npx wrangler d1 migrations apply trio-sprint-scores --remote`.
+
+Automatic deployment uses `.github/workflows/cloudflare.yml`. Set the repository
+secret `CLOUDFLARE_API_TOKEN` to a token restricted to the personal Cloudflare
+account, with Account permissions: Workers Scripts Edit, D1 Edit, and Account
+Settings Read. Keep the token in GitHub secrets, never in the repository.
+The local Wrangler OAuth login is separate from this CI credential.
 
 For a fresh deployment in another account, update `account_id` in the config,
 then run from `backend/`:
@@ -138,13 +147,14 @@ npm run deploy
 ```
 
 Set the GitHub repository variable `API_URL` to the deployed Worker URL. The
-Pages and Android release workflows pass it to Flutter. Rebuild/deploy the web
+Cloudflare and Android release workflows pass it to Flutter. Rebuild/deploy the web
 app after setting it. For manual Android builds, also pass
 `--dart-define=API_URL=https://YOUR-WORKER.workers.dev`.
 
 For local development, from `backend/`:
 
 ```sh
+mkdir -p ../build/web # Or build the Flutter website first.
 npx wrangler d1 migrations apply trio-sprint-scores --local
 npm run dev
 ```
@@ -165,4 +175,11 @@ npm run test:integration
 `tool/build_web.py` must run after every production web build. It fingerprints
 and precaches that build’s local assets in `sw.js`, including CanvasKit and fonts.
 It supports deployment in a subdirectory and offline navigation via seed links.
-It does not cache scores or room traffic. The Pages workflow runs it automatically.
+It does not cache scores or room traffic. The Cloudflare workflow runs it automatically.
+
+`redirect/` is the GitHub Pages site. It forwards old links to Cloudflare,
+preserving their query and fragment. Its service worker replaces the old offline
+cache so existing installs also redirect. Home-screen shortcuts should be
+reinstalled from the Cloudflare address. Browser-local nicknames, personal bests,
+and attempt records belong to the old origin and do not move with a redirect;
+the first-attempt honor rule still applies across both addresses.

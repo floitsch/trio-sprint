@@ -22,6 +22,7 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npm test
+      - run: mkdir -p ../build/web
       - run: npx wrangler d1 migrations apply trio-sprint-scores --local
       - name: Integration tests
         env:
