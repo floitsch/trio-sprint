@@ -92,6 +92,9 @@ export class RaceRoom extends DurableObject {
     ctx.blockConcurrencyWhile(async () => { this.game = await ctx.storage.get('game'); });
   }
   async save() { await this.ctx.storage.put('game', this.game); }
+  connected(token) {
+    return this.ctx.getWebSockets(token).some(socket => socket.readyState === WebSocket.OPEN);
+  }
   async fetch(request) {
     if (new URL(request.url).pathname === '/create') {
       if (this.game) return json({ error: 'Room already exists' }, 409);
@@ -141,7 +144,7 @@ export class RaceRoom extends DurableObject {
       seed: started || game.ended ? game.seed : null,
       board: started && !game.ended ? this.runFor(own).board : [],
       players: game.players.map(p => ({ name: p.name, progress: p.progress, mistakes: p.mistakes,
-        ready: p.ready, connected: this.ctx.getWebSockets(p.token).length > 0 })),
+        ready: p.ready, connected: this.connected(p.token) })),
     };
   }
   broadcast() {
@@ -160,7 +163,7 @@ export class RaceRoom extends DurableObject {
     if (!player) return;
     if (data.type === 'ready' && !this.game.startAt) {
       player.ready = true;
-      if (this.game.players.length === 2 && this.game.players.every(p => p.ready && this.ctx.getWebSockets(p.token).length)) {
+      if (this.game.players.length === 2 && this.game.players.every(p => p.ready && this.connected(p.token))) {
         this.game.startAt = Date.now() + 3000;
         await this.ctx.storage.setAlarm(this.game.startAt);
       }
@@ -191,7 +194,8 @@ export class RaceRoom extends DurableObject {
     this.broadcast();
   }
   async webSocketClose(socket, code, reason) {
-    socket.close(code, reason);
+    // These codes describe a disconnect but cannot be sent in a close frame.
+    socket.close([1005, 1006, 1015].includes(code) ? 1000 : code, reason);
     this.broadcast();
   }
   async webSocketError(socket) { socket.close(1011, 'Connection error'); }

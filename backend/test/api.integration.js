@@ -98,6 +98,7 @@ test('two-player race: countdown, identical boards, validation, reconnect and wi
     }
     assert.deepEqual(second.state.board, starting);
     first.close();
+    await second.wait(s => s.players.some(p => p.name === 'Alice' && !p.connected));
     reconnect = new Client(room, id, 'Alice');
     await reconnect.wait(s => s.players[s.you].progress === 1);
     assert.deepEqual(reconnect.state.board, nextBoard);
