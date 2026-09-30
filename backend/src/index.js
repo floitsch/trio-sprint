@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Toit contributors.
 import { DurableObject } from 'cloudflare:workers';
 import { SeededRun, seededBoards, validName, validPlayer, validSeed, validateScore } from './game.js';
+import { registerDevice, deviceCount, linkDevices, scoreQuery, insertScoreQuery, existingScoreQuery } from './players.js';
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
@@ -32,32 +33,35 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers });
     const url = new URL(request.url);
     try {
+      if (url.pathname === '/players/code' && request.method === 'POST') {
+        const body = await readJson(request);
+        if (!validPlayer(body?.player)) return json({ error: 'Invalid player' }, 400);
+        await registerDevice(env.DB, body.player);
+        return json({ code: body.player, devices: await deviceCount(env.DB, body.player) });
+      }
+      if (url.pathname === '/players/merge' && request.method === 'POST') {
+        const result = await linkDevices(env.DB, await readJson(request));
+        return json(result, result.status ?? 200);
+      }
       if (url.pathname === '/scores' && request.method === 'GET') {
         const seed = url.searchParams.get('seed');
         if (seed && !validSeed(seed)) return json({ error: 'Invalid seed' }, 400);
-        const where = seed ? 'WHERE seed = ?' : "WHERE seed LIKE 's2-%'";
         const unique = url.searchParams.get('unique') !== 'false';
-        const query = unique
-          ? `SELECT name, seed, milliseconds, mistakes FROM (
-              SELECT *, ROW_NUMBER() OVER (PARTITION BY player ORDER BY milliseconds, id) AS rank
-              FROM scores ${where}) WHERE rank = 1 ORDER BY milliseconds, id LIMIT 100`
-          : `SELECT name, seed, milliseconds, mistakes FROM scores ${where} ORDER BY milliseconds, id LIMIT 100`;
-        const statement = env.DB.prepare(query);
+        const statement = env.DB.prepare(scoreQuery(unique, !!seed));
         const { results } = await (seed ? statement.bind(seed) : statement).all();
         return json({ scores: results });
       }
       if (url.pathname === '/scores' && request.method === 'POST') {
         const body = await readJson(request);
         if (!validateScore(body)) return json({ error: 'Invalid score or solutions' }, 400);
-        const result = await env.DB.prepare(`INSERT INTO scores
-          (player, name, seed, milliseconds, mistakes) VALUES (?, ?, ?, ?, ?)
-          ON CONFLICT(player, seed) DO NOTHING`).bind(body.player, body.name.trim(), body.seed,
-            body.milliseconds, body.mistakes).run();
+        const result = await env.DB.prepare(insertScoreQuery)
+          .bind(body.player, body.name.trim(), body.seed, body.milliseconds, body.mistakes,
+            body.seed, body.player, body.player).run();
         if (!result.meta.changes) {
-          const previous = await env.DB.prepare('SELECT milliseconds, mistakes FROM scores WHERE player = ? AND seed = ?')
-            .bind(body.player, body.seed).first();
+          const previous = await env.DB.prepare(existingScoreQuery)
+            .bind(body.seed, body.player, body.player).first();
           // Retrying a timed-out submission is safe; a better replay cannot replace it.
-          if (previous.milliseconds !== body.milliseconds || previous.mistakes !== body.mistakes)
+          if (!previous || previous.milliseconds !== body.milliseconds || previous.mistakes !== body.mistakes)
             return json({ error: 'This player has already submitted this seed. Replays are practice.' }, 409);
         }
         return json({ ok: true });

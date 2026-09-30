@@ -8,6 +8,20 @@ import 'package:trio_sprint/data.dart';
 import 'package:trio_sprint/game.dart';
 
 void main() {
+  test('device codes accept copied grouping, whitespace and uppercase', () {
+    const code = '12345678abcdef0012345678abcdef0012345678abcdef00';
+    expect(normalizeDeviceCode(code), code);
+    expect(
+      normalizeDeviceCode(
+        ' 12345678-ABCDEF00-12345678\nABCDEF00-12345678-ABCDEF00 ',
+      ),
+      code,
+    );
+    expect(normalizeDeviceCode(''), isNull);
+    expect(normalizeDeviceCode('12345678'), isNull);
+    expect(normalizeDeviceCode('${code}a'), isNull);
+    expect(normalizeDeviceCode(code.replaceFirst('1', 'g')), isNull);
+  });
   test('versioned seed boards match the server golden fixtures', () {
     final fixtures = jsonDecode(
       File('test/seed_fixtures.json').readAsStringSync(),

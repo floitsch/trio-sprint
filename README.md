@@ -9,6 +9,10 @@ replaced by three cards while the other nine stay in place. Abandon returns to
 the start screen during either the countdown or play, without restoring seed
 eligibility.
 
+The board fits all 12 portrait cards to the available width and height, including
+short phone viewports. Compact run controls leave more room for cards; landscape
+places the controls beside the board.
+
 For every feature — number, shape, color, fill — the three cards must be all the
 same or all different. Wrong trios count as mistakes while the clock continues.
 Leaving the app does not pause the stopwatch.
@@ -29,6 +33,13 @@ Leaving the app does not pause the stopwatch.
   Deployments preserve the D1 database and its existing scores.
   Nicknames and random player IDs are remembered on each device, without login.
   First-attempt personal bests also persist locally.
+- **Link devices:** copy the code under **Link devices** on one machine and
+  paste it into the same screen on another. Their existing and future scores
+  then count as one player, including for **Only each player’s best**. You can
+  link more devices using any already-linked device's code. Original score rows
+  are preserved; if both devices submitted a seed, the earliest submission counts.
+  Personal bests, nicknames, seed-attempt history and training history stay local.
+  This uses the same honor system as scores and does not require a login.
 - **First attempts only:** starting a seed consumes its eligibility, including
   abandoned runs and countdown restarts. Replays are practice. Browser Web Locks
   serialize claims across tabs, and local storage remembers them across visits.
@@ -36,7 +47,7 @@ Leaving the app does not pause the stopwatch.
   After a first attempt finishes, players can opt into submitting it and confirm
   that they have never run that seed before, including on another device.
   The server validates all five solutions and allows only one score per player
-  and seed; retries of the same submission are safe. This is an honor system:
+  (including linked devices) and seed; retries of the same submission are safe. This is an honor system:
   clearing site data or switching devices creates a new identity, and submitted
   solo times are trusted. Identical nicknames do not merge different identities.
 - **Training:** choose 1–4 different features, then find sets on full boards or

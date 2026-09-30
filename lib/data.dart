@@ -15,6 +15,11 @@ String randomId() => List.generate(
   (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'),
 ).join();
 
+String? normalizeDeviceCode(String value) {
+  final code = value.toLowerCase().replaceAll(RegExp(r'[\s-]'), '');
+  return RegExp(r'^[a-f0-9]{48}$').hasMatch(code) ? code : null;
+}
+
 class PlayerData {
   PlayerData(this.preferences);
   final SharedPreferences preferences;

@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'card_view.dart';
+import 'card_board.dart';
 import 'game.dart';
 import 'data.dart';
+import 'devices.dart';
 import 'leaderboard.dart';
 import 'training.dart';
 import 'race.dart';
@@ -465,6 +467,8 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
+  bool get inRun => phase == Phase.playing || phase == Phase.countdown;
+
   @override
   Widget build(BuildContext context) => Scaffold(
     body: SafeArea(
@@ -472,14 +476,14 @@ class _GameScreenState extends State<GameScreen> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 22),
+            padding: EdgeInsets.symmetric(horizontal: inRun ? 12 : 22),
             child: Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: EdgeInsets.symmetric(vertical: inRun ? 2 : 12),
                   child: Row(
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
                           alignment: Alignment.centerLeft,
@@ -489,7 +493,7 @@ class _GameScreenState extends State<GameScreen> {
                               Text(
                                 'trio',
                                 style: TextStyle(
-                                  fontSize: 38,
+                                  fontSize: inRun ? 24 : 38,
                                   fontWeight: FontWeight.w900,
                                   letterSpacing: -2,
                                 ),
@@ -497,13 +501,13 @@ class _GameScreenState extends State<GameScreen> {
                               Text(
                                 '.',
                                 style: TextStyle(
-                                  fontSize: 38,
+                                  fontSize: inRun ? 24 : 38,
                                   fontWeight: FontWeight.w900,
                                   color: accent,
                                 ),
                               ),
-                              SizedBox(width: 12),
-                              Text(
+                              const SizedBox(width: 12),
+                              const Text(
                                 'SPRINT',
                                 style: TextStyle(
                                   fontSize: 11,
@@ -655,6 +659,21 @@ class _GameScreenState extends State<GameScreen> {
         ),
         TextButton(onPressed: () => openRace(), child: const Text('1 vs 1')),
         TextButton(
+          onPressed: () async {
+            await loading;
+            if (!mounted) return;
+            if (player == null) {
+              message('Device storage is needed to link devices.');
+              return;
+            }
+            await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => DevicesScreen(player: player!)),
+            );
+          },
+          child: const Text('Link devices'),
+        ),
+        TextButton(
           onPressed: () => showInstall(context),
           child: const Text('Install app'),
         ),
@@ -671,64 +690,90 @@ class _GameScreenState extends State<GameScreen> {
   ]);
 
   Widget countdownView() => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Text(
-          'EYES READY',
-          style: TextStyle(
-            fontSize: 12,
-            letterSpacing: 3,
-            fontWeight: FontWeight.w700,
+    child: FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'EYES READY',
+            style: TextStyle(
+              fontSize: 12,
+              letterSpacing: 3,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-        Text(
-          '$countdown',
-          key: const ValueKey('countdown'),
-          style: const TextStyle(
-            fontSize: 144,
-            height: 1.4,
-            fontWeight: FontWeight.w800,
-            color: accent,
+          Text(
+            '$countdown',
+            key: const ValueKey('countdown'),
+            style: const TextStyle(
+              fontSize: 144,
+              height: 1.4,
+              fontWeight: FontWeight.w800,
+              color: accent,
+            ),
           ),
-        ),
-        const Text(
-          'Five sets. You’ve got this.',
-          style: TextStyle(fontSize: 17),
-        ),
-      ],
+          const Text(
+            'Five sets. You’ve got this.',
+            style: TextStyle(fontSize: 17),
+          ),
+        ],
+      ),
     ),
   );
 
-  Widget playing() => Column(
+  Widget playing() => LayoutBuilder(
+    builder: (context, constraints) {
+      final status = runStatus();
+      final board = Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: CardBoard(
+          cards: game.board.map((card) => card.id).toList(),
+          selected: game.selected,
+          onTap: pick,
+        ),
+      );
+      if (constraints.maxWidth > 500 &&
+          constraints.maxWidth > constraints.maxHeight * 1.5) {
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(width: 176, child: status),
+            const SizedBox(width: 16),
+            Expanded(child: board),
+          ],
+        );
+      }
+      return Column(
+        children: [
+          status,
+          Expanded(child: board),
+        ],
+      );
+    },
+  );
+
+  Widget runStatus() => Column(
+    mainAxisSize: MainAxisSize.min,
     children: [
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
             child: FittedBox(
               fit: BoxFit.scaleDown,
-              alignment: Alignment.bottomLeft,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              alignment: Alignment.centerLeft,
+              child: Row(
                 children: [
-                  const Text(
-                    'YOUR STREAK',
-                    style: TextStyle(
-                      fontSize: 10,
-                      letterSpacing: 1.7,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
                   Text(
                     '${game.streak} / 5',
                     style: const TextStyle(
-                      fontSize: 30,
+                      fontSize: 22,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  const Text('sets', style: TextStyle(fontSize: 12)),
                 ],
               ),
             ),
@@ -736,55 +781,47 @@ class _GameScreenState extends State<GameScreen> {
           Expanded(
             child: FittedBox(
               fit: BoxFit.scaleDown,
-              alignment: Alignment.bottomRight,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  const Text(
-                    'TIME',
-                    style: TextStyle(
-                      fontSize: 10,
-                      letterSpacing: 1.7,
-                      fontWeight: FontWeight.w700,
-                    ),
+              alignment: Alignment.centerRight,
+              child: ValueListenableBuilder<Duration>(
+                valueListenable: elapsed,
+                builder: (context, value, child) => Text(
+                  formatTime(value),
+                  key: const ValueKey('timer'),
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w600,
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
-                  ValueListenableBuilder<Duration>(
-                    valueListenable: elapsed,
-                    builder: (context, value, child) => Text(
-                      formatTime(value),
-                      key: const ValueKey('timer'),
-                      style: const TextStyle(
-                        fontSize: 36,
-                        fontWeight: FontWeight.w600,
-                        fontFeatures: [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
         ],
       ),
-      Text(
-        eligible
-            ? 'First attempt · ${game.seed}'
-            : 'Practice replay · ${game.seed}',
-        style: const TextStyle(fontSize: 11),
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            eligible
+                ? 'First attempt · ${game.seed}'
+                : 'Practice replay · ${game.seed}',
+            style: const TextStyle(fontSize: 11, color: Color(0xFF68717B)),
+          ),
+        ),
       ),
       if (game.seed!.startsWith('s1-'))
         const Text(
           'Legacy seed · new board after each set',
           style: TextStyle(fontSize: 11),
         ),
-      const SizedBox(height: 12),
       Row(
         children: List.generate(
           5,
           (i) => Expanded(
             child: Container(
               margin: EdgeInsets.only(right: i == 4 ? 0 : 6),
-              height: 5,
+              height: 4,
               decoration: BoxDecoration(
                 color: i < game.streak ? accent : const Color(0xFFDEDED5),
                 borderRadius: BorderRadius.circular(3),
@@ -794,72 +831,19 @@ class _GameScreenState extends State<GameScreen> {
         ),
       ),
       SizedBox(
-        height: 56,
+        height: 32,
         child: Center(
           child: Semantics(
             liveRegion: true,
-            child: Text(
-              feedback,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 14),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                feedback,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13),
+              ),
             ),
           ),
-        ),
-      ),
-      Expanded(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final columns = constraints.maxWidth > 500 ? 4 : 3;
-            final rows = (game.board.length / columns).ceil();
-            final tileHeight =
-                ((constraints.maxHeight - (rows - 1) * 10) / rows).clamp(
-                  96.0,
-                  210.0,
-                );
-            final gridWidth =
-                (columns * tileHeight * 2 / 3 + (columns - 1) * 10).clamp(
-                  0.0,
-                  constraints.maxWidth,
-                );
-            final gridHeight =
-                rows * (gridWidth - (columns - 1) * 10) / columns * 3 / 2 +
-                (rows - 1) * 10;
-            return Align(
-              alignment: Alignment.topCenter,
-              child: SizedBox(
-                width: gridWidth,
-                child: GridView.builder(
-                  padding: EdgeInsets.zero,
-                  physics: gridHeight <= constraints.maxHeight + 0.01
-                      ? const NeverScrollableScrollPhysics()
-                      : const ClampingScrollPhysics(),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: columns,
-                    childAspectRatio: 2 / 3,
-                    crossAxisSpacing: 10,
-                    mainAxisSpacing: 10,
-                  ),
-                  itemCount: game.board.length,
-                  itemBuilder: (context, index) {
-                    final card = game.board[index];
-                    return CardView(
-                      key: ValueKey('card-${card.id}'),
-                      card: card,
-                      selected: game.selected.contains(card.id),
-                      onTap: () => pick(card),
-                    );
-                  },
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-      const Padding(
-        padding: EdgeInsets.symmetric(vertical: 14),
-        child: Text(
-          'Each feature: all the same or all different.',
-          style: TextStyle(fontSize: 12, color: Color(0xFF68717B)),
         ),
       ),
     ],

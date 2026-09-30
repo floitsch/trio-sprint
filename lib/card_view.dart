@@ -45,9 +45,13 @@ class CardView extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: CustomPaint(painter: SymbolsPainter(card)),
+                LayoutBuilder(
+                  builder: (context, constraints) => Padding(
+                    padding: EdgeInsets.all(
+                      (constraints.maxWidth * .1).clamp(6.0, 14.0),
+                    ),
+                    child: CustomPaint(painter: SymbolsPainter(card)),
+                  ),
                 ),
                 if (selected)
                   const Positioned(
@@ -147,8 +151,8 @@ class SymbolsPainter extends CustomPainter {
     canvas.translate(size.width, 0);
     canvas.rotate(math.pi / 2);
     size = Size(size.height, size.width);
-    final width = (size.width / 4.5).clamp(0.0, 25.0);
-    final height = (size.height * .78).clamp(0.0, 55.0);
+    final width = size.width / 4.5;
+    final height = size.height * .84;
     final gap = width * .38;
     final total = card.count * width + (card.count - 1) * gap;
     final color = colors[card.color];

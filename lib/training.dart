@@ -1,9 +1,8 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 
-import 'card_view.dart';
+import 'card_board.dart';
 import 'data.dart';
 import 'game.dart';
 import 'practice.dart';
@@ -246,7 +245,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   }
 
   Widget playing() => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 22),
+    padding: const EdgeInsets.symmetric(horizontal: 12),
     child: Column(
       children: [
         SizedBox(
@@ -261,7 +260,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final choices = FittedCardBoard(
+              final choices = CardBoard(
+                keyPrefix: 'training-card',
                 cards: exercise!.cards,
                 selected: {
                   ...selected,
@@ -271,7 +271,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
                 onTap: pick,
               );
               if (exercise!.anchors.isEmpty) return choices;
-              final anchors = FittedCardBoard(
+              final anchors = CardBoard(
+                keyPrefix: 'training-card',
                 cards: exercise!.anchors,
                 columns: 2,
               );
@@ -324,63 +325,5 @@ class _TrainingScreenState extends State<TrainingScreen> {
         ),
       ],
     ),
-  );
-}
-
-/// The same portrait cards and spacing as the sprint, sized to the whole board.
-class FittedCardBoard extends StatelessWidget {
-  const FittedCardBoard({
-    super.key,
-    required this.cards,
-    this.selected = const {},
-    this.onTap,
-    this.columns,
-  });
-  final List<int> cards;
-  final Set<int> selected;
-  final ValueChanged<SetCard>? onTap;
-  final int? columns;
-
-  @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final count =
-          columns ??
-          (constraints.maxWidth > 500
-              ? (constraints.maxHeight < 330 ? 6 : 4)
-              : 3);
-      final rows = (cards.length / count).ceil();
-      const gap = 10.0;
-      final width = max(
-        0.0,
-        min(
-          (constraints.maxWidth - (count - 1) * gap) / count,
-          min(140.0, (constraints.maxHeight - (rows - 1) * gap) / rows * 2 / 3),
-        ),
-      );
-      return Align(
-        alignment: Alignment.topCenter,
-        child: SizedBox(
-          width: count * width + (count - 1) * gap,
-          child: GridView.count(
-            padding: EdgeInsets.zero,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: count,
-            childAspectRatio: 2 / 3,
-            crossAxisSpacing: gap,
-            mainAxisSpacing: gap,
-            children: [
-              for (final id in cards)
-                CardView(
-                  key: ValueKey('training-card-$id'),
-                  card: SetCard(id),
-                  selected: selected.contains(id),
-                  onTap: onTap == null ? null : () => onTap!(SetCard(id)),
-                ),
-            ],
-          ),
-        ),
-      );
-    },
   );
 }

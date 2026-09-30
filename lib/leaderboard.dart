@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'data.dart';
+import 'devices.dart';
 import 'game.dart';
 
 class LeaderboardScreen extends StatefulWidget {
@@ -60,6 +61,20 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     appBar: AppBar(
       title: const Text('High scores'),
       actions: [
+        if (widget.player != null)
+          IconButton(
+            tooltip: 'Link devices',
+            icon: const Icon(Icons.devices),
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => DevicesScreen(player: widget.player!),
+                ),
+              );
+              if (mounted) refresh();
+            },
+          ),
         IconButton(
           onPressed: refresh,
           icon: const Icon(Icons.refresh),
@@ -75,7 +90,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
             SwitchListTile(
               title: const Text('Only each player’s best'),
               subtitle: const Text(
-                'Hide additional runs from the same device identity.',
+                'Hide additional runs from the same player, including linked devices.',
               ),
               value: unique,
               onChanged: (value) {
