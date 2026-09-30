@@ -1,11 +1,70 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trio_sprint/card_view.dart';
 import 'package:trio_sprint/game.dart';
 import 'package:trio_sprint/main.dart';
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+  testWidgets(
+    'a previously started seed is practice even after reloading the app',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({'attempt:s1-1234abcd': true});
+      await tester.pumpWidget(const TrioSprintApp());
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Run a seed'));
+      await tester.tap(find.text('Run a seed'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 's1-1234abcd');
+      await tester.tap(find.text('Run seed'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text('Practice replay · s1-1234abcd'), findsOneWidget);
+      for (var round = 0; round < 5; round++) {
+        final cards = tester
+            .widgetList<CardView>(find.byType(CardView))
+            .map((v) => v.card)
+            .toList();
+        for (final card in findSet(cards)!) {
+          final target = find.byKey(ValueKey('card-${card.id}'));
+          await tester.ensureVisible(target);
+          await tester.tap(target);
+          await tester.pump();
+        }
+      }
+      expect(tester.takeException(), isNull);
+      expect(find.text('Submit high score'), findsNothing);
+      expect(find.text('Practice run'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'training and install help are reachable without online services',
+    (tester) async {
+      await tester.pumpWidget(const TrioSprintApp());
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Training'));
+      await tester.tap(find.text('Training'));
+      await tester.pumpAndSettle();
+      expect(find.text('Find the third card'), findsOneWidget);
+      expect(find.byType(CardView), findsNWidgets(12));
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+      expect(find.byType(CardView), findsNWidgets(8));
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Install app'));
+      await tester.tap(find.text('Install app'));
+      await tester.pumpAndSettle();
+      expect(find.text('Install Trio Sprint'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   testWidgets('three moving fingers can select a set simultaneously', (
     tester,
   ) async {
@@ -14,7 +73,10 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(const TrioSprintApp());
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Start run'));
+    await tester.pump();
+    await tester.pump();
     await tester.pump(const Duration(seconds: 2));
     final cards = tester
         .widgetList<CardView>(find.byType(CardView))
@@ -51,7 +113,10 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(const TrioSprintApp());
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Start run'));
+    await tester.pump();
+    await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     await tester.pump(const Duration(seconds: 1));
@@ -99,7 +164,10 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(const TrioSprintApp());
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Start run'));
+    await tester.pump();
+    await tester.pump();
     await tester.pump();
     expect(find.text('2'), findsOneWidget);
     expect(find.byType(CardView), findsNothing);
@@ -131,7 +199,9 @@ void main() {
       tester.widget<Text>(find.byKey(const ValueKey('result-time'))).data,
       result,
     );
+    await tester.ensureVisible(find.text('Play again'));
     await tester.tap(find.text('Play again'));
+    await tester.pumpAndSettle();
     await tester.pump();
     expect(find.text('2'), findsOneWidget);
     await tester.pump(const Duration(seconds: 1));
@@ -144,10 +214,14 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(const TrioSprintApp());
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Start run'));
+    await tester.pump();
+    await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     await tester.tap(find.byTooltip('Restart run'));
+    await tester.pumpAndSettle();
     await tester.pump();
     expect(find.text('2'), findsOneWidget);
     await tester.pump(const Duration(seconds: 1));
@@ -169,10 +243,12 @@ void main() {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1;
         await tester.pumpWidget(const TrioSprintApp());
+        await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         expectPortraitCards(tester);
         await tester.ensureVisible(find.text('Start run'));
         await tester.tap(find.text('Start run'));
+        await tester.pumpAndSettle();
         await tester.pump();
         expect(tester.takeException(), isNull);
         await tester.pump(const Duration(seconds: 1));

@@ -7,3 +7,5 @@ android/local.properties
 android/.gradle/
 *.iml
 .idea/
+backend/node_modules/
+backend/.wrangler/

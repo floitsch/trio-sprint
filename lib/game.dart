@@ -45,11 +45,13 @@ List<SetCard>? findSet(List<SetCard> cards) {
 enum PickResult { selected, deselected, wrong, correct, finished }
 
 class SetGame {
-  SetGame({Random? random}) : _random = random ?? Random() {
+  SetGame({Random? random, this.seed}) : _random = random ?? Random() {
     restart();
   }
 
   final Random _random;
+  final String? seed;
+  List<List<SetCard>>? _rounds;
   final List<SetCard> board = [];
   final List<SetCard> _deck = [];
   final Set<int> selected = {};
@@ -62,6 +64,11 @@ class SetGame {
     mistakes = 0;
     selected.clear();
     board.clear();
+    if (seed != null) {
+      _rounds = seededBoards(seed!);
+      board.addAll(_rounds!.first);
+      return;
+    }
     _deck
       ..clear()
       ..addAll(List.generate(81, SetCard.new)..shuffle(_random));
@@ -86,6 +93,13 @@ class SetGame {
     if (finished) {
       selected.clear();
       return PickResult.finished;
+    }
+    if (_rounds != null) {
+      board
+        ..clear()
+        ..addAll(_rounds![streak]);
+      selected.clear();
+      return PickResult.correct;
     }
     if (_deck.length < 3) _refreshDeck();
     final lastDealtPositions = <int>[];
@@ -135,4 +149,118 @@ String formatTime(Duration duration) {
   final fraction = (hundredths % 100).toString().padLeft(2, '0');
   if (seconds < 60) return '$seconds.$fraction';
   return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}.$fraction';
+}
+
+/// s1 uses an explicitly specified PRNG and shuffle, shared with the server.
+/// Never change this algorithm without introducing a new seed version.
+class SeedRandom {
+  SeedRandom(this.state);
+  int state;
+  int nextInt(int maximum) {
+    state = (1664525 * state + 1013904223) % 4294967296;
+    return state % maximum;
+  }
+
+  void shuffle<T>(List<T> values) {
+    for (var i = values.length - 1; i > 0; i--) {
+      final j = nextInt(i + 1);
+      final temporary = values[i];
+      values[i] = values[j];
+      values[j] = temporary;
+    }
+  }
+}
+
+String? normalizeSeed(String value) {
+  final trimmed = value.trim();
+  final uri = Uri.tryParse(trimmed);
+  final seed = (uri?.queryParameters['seed'] ?? trimmed).toLowerCase();
+  return RegExp(r'^s1-[0-9a-f]{8}$').hasMatch(seed) ? seed : null;
+}
+
+String newSeed() =>
+    's1-${Random.secure().nextInt(0x100000000).toRadixString(16).padLeft(8, '0')}';
+
+List<List<SetCard>> seededBoards(String seed) {
+  if (normalizeSeed(seed) != seed) throw ArgumentError('Invalid seed');
+  final random = SeedRandom(int.parse(seed.substring(3), radix: 16));
+  return List.generate(5, (_) {
+    for (var attempt = 0; attempt < 100; attempt++) {
+      final deck = List.generate(81, SetCard.new);
+      random.shuffle(deck);
+      final board = deck.take(12).toList();
+      if (findSet(board) != null) return board;
+    }
+    // Bounded fallback with a guaranteed set.
+    final rest = List.generate(78, (i) => SetCard(i + 3));
+    random.shuffle(rest);
+    final board = [
+      const SetCard(0),
+      const SetCard(1),
+      const SetCard(2),
+      ...rest.take(9),
+    ];
+    random.shuffle(board);
+    return board;
+  });
+}
+
+int differentAttributes(List<SetCard> cards) => List.generate(
+  4,
+  (i) => i,
+).where((i) => cards.map((c) => c.attributes[i]).toSet().length == 3).length;
+
+String explainTrio(List<SetCard> cards) {
+  const names = ['Number', 'Shape', 'Color', 'Fill'];
+  return List.generate(4, (i) {
+    final count = cards.map((c) => c.attributes[i]).toSet().length;
+    return '${names[i]}: ${count == 1
+        ? 'all same'
+        : count == 3
+        ? 'all different'
+        : 'two same, one different ✗'}';
+  }).join(' · ');
+}
+
+class TrainingExercise {
+  TrainingExercise({
+    required this.differences,
+    required this.completePair,
+    Random? random,
+  }) {
+    final rng = random ?? Random();
+    final candidates = <List<SetCard>>[];
+    // Each pair determines exactly one third card.
+    for (var a = 0; a < 81; a++) {
+      for (var b = a + 1; b < 81; b++) {
+        final aa = SetCard(a).attributes;
+        final bb = SetCard(b).attributes;
+        var c = 0;
+        var place = 1;
+        for (var i = 0; i < 4; i++) {
+          c += ((6 - aa[i] - bb[i]) % 3) * place;
+          place *= 3;
+        }
+        if (c <= b) continue;
+        final trio = [SetCard(a), SetCard(b), SetCard(c)];
+        if (differentAttributes(trio) == differences) candidates.add(trio);
+      }
+    }
+    solution = [...candidates[rng.nextInt(candidates.length)]]..shuffle(rng);
+    final excluded = solution.map((c) => c.id).toSet();
+    final distractors = List.generate(
+      81,
+      SetCard.new,
+    ).where((c) => !excluded.contains(c.id)).toList()..shuffle(rng);
+    board = completePair
+        ? [solution[2], ...distractors.take(5)]
+        : [...solution, ...distractors.take(9)];
+    board.shuffle(rng);
+  }
+  final int differences;
+  final bool completePair;
+  late final List<SetCard> solution;
+  late final List<SetCard> board;
+  bool accepts(List<SetCard> cards) =>
+      isSet(cards) && differentAttributes(cards) == differences;
 }

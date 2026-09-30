@@ -34,7 +34,7 @@ jobs:
           keyAlias=upload
           keyPassword=$PASSWORD
           EOF
-      - run: flutter build apk --release
+      - run: flutter build apk --release --dart-define=API_URL=${{ vars.API_URL }}
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

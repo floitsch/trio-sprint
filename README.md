@@ -3,15 +3,39 @@
 **[Play in the browser](https://floitsch.github.io/trio-sprint/)** ·
 **[Download for Android](https://github.com/floitsch/trio-sprint/releases/latest/download/trio-sprint.apk)**
 
-A Flutter pattern game: find **five sets in a row**, with a two-second countdown
-before the cards appear and the stopwatch starts. Tap **Play again** for a fresh
-run. No accounts, ads, network requests, or runtime dependencies.
-
-For each feature — number, shape, color, fill — the three selected cards must be
-all the same or all different. A wrong trio counts as a mistake while the clock
-keeps running. Tap a selected card again to deselect it. The board always has 12
-cards and at least one set. Your best time is kept for the current app session.
+A Flutter pattern game: find **five sets** with a two-second countdown before
+cards appear and the stopwatch starts. Each round has a fresh 12-card board.
+For every feature — number, shape, color, fill — the three cards must be all the
+same or all different. Wrong trios count as mistakes while the clock continues.
 Leaving the app does not pause the stopwatch.
+
+- **Seeds:** every sprint uses a versioned seed, such as `s1-1234abcd`. Share a
+  link or paste a seed/link into **Run a seed**. Everyone gets the same five
+  boards, independent of the sets they choose. Seed algorithm versions are
+  permanent; changing the algorithm requires a new prefix.
+- **High scores:** fastest 100 runs, across all seeds or for one seed. Toggle
+  **Only each player’s best** to hide additional runs from the same player ID.
+  Nicknames and random player IDs are remembered on each device, without login.
+  First-attempt personal bests also persist locally.
+- **First attempts only:** starting a seed consumes its eligibility, including
+  abandoned runs and countdown restarts. Replays are practice. Browser Web Locks
+  serialize claims across tabs, and local storage remembers them across visits.
+  Android uses persistent preferences. Storage failures make runs practice-only.
+  After a first attempt finishes, players can opt into submitting it and confirm
+  that they have never run that seed before, including on another device.
+  The server validates all five solutions and allows only one score per player
+  and seed; retries of the same submission are safe. This is an honor system:
+  clearing site data or switching devices creates a new identity, and submitted
+  solo times are trusted. Identical nicknames do not merge different identities.
+- **Training:** choose 1–4 different features, find a set on a board or complete
+  a pair, and use hints and per-feature explanations. Untimed and offline.
+- **1 vs 1:** share a room link/code, ready up, and race through the same five
+  boards. A Cloudflare room validates claims and chooses the winner. Reconnect
+  with the same device to resume; leaving forfeits a started race. Rooms expire
+  after one hour. Race boards count as seen seeds and do not award solo scores.
+
+Solo play and training work offline once the app assets have downloaded. High
+scores and multiplayer require the Cloudflare backend described below.
 
 Trio Sprint is an unofficial fan project. It is not affiliated with, endorsed
 by, or sponsored by PlayMonster or Set Enterprises. SET® is a registered
@@ -22,8 +46,12 @@ trademark of its owner.
 - **Android:** download the APK above and open it. Allow your browser or file
   manager to install apps when Android asks.
 - **iPhone and iPad:** open the browser version in Safari and choose
-  *Share → Add to Home Screen*. iOS doesn't allow installing apps from outside
-  the App Store, so there is no iOS download.
+  *Share → Add to Home Screen* and enable *Open as Web App* if shown.
+- **Android web app:** use **Install app** in the game, or Chrome’s menu →
+  *Install app / Add to Home screen*. No app store account is needed.
+
+The offline cache is downloaded on the first visit. Updates wait until existing
+app windows close, so a new deployment cannot interrupt an active run.
 
 ## Run
 
@@ -47,7 +75,8 @@ IDE plugin can be installed from Android Studio's Plugins settings.
 ./toolw flutter analyze
 ./toolw flutter test
 ./toolw flutter build apk --debug --target-platform android-arm,android-arm64
-./toolw flutter build web --no-web-resources-cdn
+./toolw flutter build web --no-web-resources-cdn --dart-define=API_URL=https://YOUR-WORKER.workers.dev
+python3 tool/build_web.py
 ```
 
 The Android debug APK for ARM phones is written to
@@ -82,3 +111,58 @@ debug keys.
 The code is available under the [BSD Zero Clause License](LICENSE). The Roboto
 fonts in `assets/fonts/` are under the Apache License 2.0; see
 `assets/fonts/LICENSE.txt`.
+
+## Cloudflare backend
+
+Production API: **https://trio-sprint.floitsch.workers.dev**. The GitHub
+repository variable `API_URL` points to this Worker.
+
+The Flutter website may stay on GitHub Pages. The backend uses one Worker,
+D1 for scores, and a SQLite-backed Durable Object per race room. No secrets go
+into the app. `API_URL` is a public base URL without a trailing slash. If omitted,
+solo/training still work and online actions explain that they are unconfigured.
+
+To update the existing backend, run `npm ci` and `npm run deploy` in `backend/`.
+Apply any new D1 migrations with `npx wrangler d1 migrations apply trio-sprint-scores --remote`.
+
+For a fresh deployment in another account, update `account_id` in the config,
+then run from `backend/`:
+
+```sh
+npm ci
+npx wrangler login
+npx wrangler d1 create trio-sprint-scores
+# Copy the returned database_id into backend/wrangler.jsonc.
+npx wrangler d1 migrations apply trio-sprint-scores --remote
+npm run deploy
+```
+
+Set the GitHub repository variable `API_URL` to the deployed Worker URL. The
+Pages and Android release workflows pass it to Flutter. Rebuild/deploy the web
+app after setting it. For manual Android builds, also pass
+`--dart-define=API_URL=https://YOUR-WORKER.workers.dev`.
+
+For local development, from `backend/`:
+
+```sh
+npx wrangler d1 migrations apply trio-sprint-scores --local
+npm run dev
+```
+
+Then run Flutter with `--dart-define=API_URL=http://localhost:8787`. A physical
+phone needs the development machine’s reachable address rather than localhost.
+
+Backend checks (integration tests write only to the configured test server;
+use a disposable local database):
+
+```sh
+cd backend
+npm test
+# With npm run dev running in another terminal:
+npm run test:integration
+```
+
+`tool/build_web.py` must run after every production web build. It fingerprints
+and precaches that build’s local assets in `sw.js`, including CanvasKit and fonts.
+It supports deployment in a subdirectory and offline navigation via seed links.
+It does not cache scores or room traffic. The Pages workflow runs it automatically.
