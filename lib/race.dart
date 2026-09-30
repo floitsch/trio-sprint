@@ -268,7 +268,7 @@ class _RaceScreenState extends State<RaceScreen> {
               padding: const EdgeInsets.all(20),
               children: [
                 const Text(
-                  'Same five boards. First to five wins. Leaving a started race forfeits it.',
+                  'Same seeded deck. First to five sets wins. Leaving a started race forfeits it.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),

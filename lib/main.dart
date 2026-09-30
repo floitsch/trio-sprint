@@ -62,6 +62,7 @@ class _GameScreenState extends State<GameScreen> {
   late final Future<void> loading;
   String? pendingSeed;
   bool starting = false;
+  int runGeneration = 0;
   bool eligible = false;
   bool submitted = false;
   bool submitting = false;
@@ -137,7 +138,7 @@ class _GameScreenState extends State<GameScreen> {
               controller: controller,
               autofocus: true,
               decoration: const InputDecoration(
-                hintText: 's1-1234abcd or a shared link',
+                hintText: 's2-1234abcd or a shared link',
               ),
             ),
             const SizedBox(height: 12),
@@ -161,7 +162,7 @@ class _GameScreenState extends State<GameScreen> {
     if (!mounted || result == null) return;
     final seed = normalizeSeed(result);
     if (seed == null) {
-      message('Enter a seed such as s1-1234abcd.');
+      message('Enter a seed such as s2-1234abcd.');
       return;
     }
     await start(seed: seed);
@@ -280,6 +281,7 @@ class _GameScreenState extends State<GameScreen> {
   Future<void> start({String? seed}) async {
     if (starting || submitting) return;
     starting = true;
+    final generation = ++runGeneration;
     if (boardClock.milliseconds >= 10000 || boardMistakes > 0) rememberBoard();
     boardClock.stop();
     boardMistakes = 0;
@@ -287,7 +289,7 @@ class _GameScreenState extends State<GameScreen> {
     countdownTimer?.cancel();
     watch.stop();
     await loading;
-    if (!mounted) return;
+    if (!mounted || generation != runGeneration) return;
     final chosenSeed = seed ?? pendingSeed ?? newSeed();
     pendingSeed = null;
     var firstAttempt = false;
@@ -298,7 +300,7 @@ class _GameScreenState extends State<GameScreen> {
         message('Could not remember this attempt. This run is practice only.');
       }
     }
-    if (!mounted) return;
+    if (!mounted || generation != runGeneration) return;
     starting = false;
     eligible = firstAttempt;
     submitted = false;
@@ -311,6 +313,8 @@ class _GameScreenState extends State<GameScreen> {
     elapsed.value = Duration.zero;
     setState(() {
       game = SetGame(seed: chosenSeed);
+      final previousBest = player?.bestForSeed(chosenSeed);
+      best = previousBest == null ? null : Duration(milliseconds: previousBest);
       countdown = 2;
       phase = Phase.countdown;
       feedback = 'Pick three cards that make a set.';
@@ -328,6 +332,17 @@ class _GameScreenState extends State<GameScreen> {
         });
       }
     });
+  }
+
+  void abandon() {
+    runGeneration++;
+    starting = false;
+    ticker?.cancel();
+    countdownTimer?.cancel();
+    watch.stop();
+    if (boardClock.milliseconds >= 10000 || boardMistakes > 0) rememberBoard();
+    boardClock.stop();
+    setState(() => phase = Phase.ready);
   }
 
   void pick(SetCard card) {
@@ -356,7 +371,9 @@ class _GameScreenState extends State<GameScreen> {
           ticker?.cancel();
           newBest = eligible && (best == null || watch.elapsed < best!);
           if (newBest) best = watch.elapsed;
-          if (eligible) player?.saveBest(watch.elapsedMilliseconds);
+          if (eligible) {
+            player?.saveBest(watch.elapsedMilliseconds, seed: game.seed!);
+          }
           phase = Phase.finished;
           HapticFeedback.mediumImpact();
         case PickResult.selected:
@@ -462,44 +479,54 @@ class _GameScreenState extends State<GameScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   child: Row(
                     children: [
-                      const Text(
-                        'trio',
-                        style: TextStyle(
-                          fontSize: 38,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -2,
-                        ),
-                      ),
-                      const Text(
-                        '.',
-                        style: TextStyle(
-                          fontSize: 38,
-                          fontWeight: FontWeight.w900,
-                          color: accent,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
                       const Expanded(
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
                           alignment: Alignment.centerLeft,
-                          child: Text(
-                            'SPRINT',
-                            style: TextStyle(
-                              fontSize: 11,
-                              letterSpacing: 3,
-                              fontWeight: FontWeight.w700,
-                            ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'trio',
+                                style: TextStyle(
+                                  fontSize: 38,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -2,
+                                ),
+                              ),
+                              Text(
+                                '.',
+                                style: TextStyle(
+                                  fontSize: 38,
+                                  fontWeight: FontWeight.w900,
+                                  color: accent,
+                                ),
+                              ),
+                              SizedBox(width: 12),
+                              Text(
+                                'SPRINT',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  letterSpacing: 3,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                      if (phase == Phase.playing || phase == Phase.countdown)
+                      if (phase == Phase.playing ||
+                          phase == Phase.countdown) ...[
+                        TextButton(
+                          onPressed: abandon,
+                          child: const Text('Abandon'),
+                        ),
                         IconButton(
                           tooltip: 'Restart run',
                           onPressed: () => start(seed: game.seed),
                           icon: const Icon(Icons.refresh_rounded),
-                        )
-                      else
+                        ),
+                      ] else
                         IconButton(
                           tooltip: 'How to play',
                           onPressed: showRules,
@@ -745,6 +772,11 @@ class _GameScreenState extends State<GameScreen> {
             : 'Practice replay · ${game.seed}',
         style: const TextStyle(fontSize: 11),
       ),
+      if (game.seed!.startsWith('s1-'))
+        const Text(
+          'Legacy seed · new board after each set',
+          style: TextStyle(fontSize: 11),
+        ),
       const SizedBox(height: 12),
       Row(
         children: List.generate(

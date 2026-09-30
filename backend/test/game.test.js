@@ -27,3 +27,45 @@ test('scores require solutions to all five actual boards', () => {
   assert.equal(validateScore({...score, name: ''}), false);
   assert.equal(validateScore({...score, solutions: score.solutions.map(() => [0, 0, 0])}), false);
 });
+
+test('s2 golden runs match every board, including different paths and tap order', async () => {
+  const {SeededRun} = await import('../src/game.js');
+  const fixtures = JSON.parse(readFileSync(new URL('../../test/run_fixtures.json', import.meta.url)));
+  for (const fixture of fixtures) {
+    const run = new SeededRun(fixture.seed);
+    for (let i = 0; i < 5; i++) {
+      assert.deepEqual(run.board, fixture.boards[i]);
+      assert.ok(run.pick([...fixture.solutions[i]].reverse()));
+    }
+    assert.equal(run.progress, 5);
+    assert.equal(run.pick(fixture.solutions[4]), false);
+    assert.ok(validateScore({player: 'a'.repeat(48), name: 'Flo', seed: fixture.seed,
+      milliseconds: 12000, mistakes: 0, solutions: fixture.solutions}));
+    assert.equal(validateScore({player: 'a'.repeat(48), name: 'Flo', seed: fixture.seed,
+      milliseconds: 12000, mistakes: 0, solutions: fixture.solutions.map(() => fixture.solutions[0])}), false);
+  }
+});
+
+test('1000 s2 runs keep unchosen cards in place and remain solvable', async () => {
+  const {SeededRun} = await import('../src/game.js');
+  for (let i = 0; i < 1000; i++) {
+    const seed = 's2-' + i.toString(16).padStart(8, '0');
+    const run = new SeededRun(seed);
+    const replay = new SeededRun(seed);
+    assert.equal(run.pick([0, 0, 0]), false);
+    for (let round = 0; round < 5; round++) {
+      const before = [...run.board];
+      const solution = findSet(i % 2 ? before : [...before].reverse());
+      assert.ok(solution);
+      assert.ok(run.pick(solution));
+      assert.ok(replay.pick([...solution].reverse()));
+      assert.deepEqual(run.board, replay.board);
+      assert.equal(new Set(run.board).size, 12);
+      for (let position = 0; position < 12; position++) {
+        if (!solution.includes(before[position]) || round === 4)
+          assert.equal(run.board[position], before[position]);
+      }
+    }
+    assert.equal(run.progress, 5);
+  }
+});

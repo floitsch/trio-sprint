@@ -28,7 +28,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
         content: TextField(
           controller: controller,
           decoration: const InputDecoration(
-            hintText: 's1-1234abcd or a shared link',
+            hintText: 's2-1234abcd or a shared link',
           ),
         ),
         actions: [
@@ -47,7 +47,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     final parsed = normalizeSeed(result);
     if (parsed == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a seed such as s1-1234abcd.')),
+        const SnackBar(content: Text('Enter a seed such as s2-1234abcd.')),
       );
       return;
     }
@@ -88,7 +88,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
               spacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text(seed ?? 'All seeds · fastest 100 runs'),
+                Text(seed ?? 'Current seeds · fastest 100 runs'),
                 TextButton(
                   onPressed: chooseSeed,
                   child: const Text('Choose seed'),

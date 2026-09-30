@@ -1,20 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { seededBoards, findSet } from '../src/game.js';
+import { SeededRun, findSet } from '../src/game.js';
 
 const base = process.env.TEST_API_URL || 'http://127.0.0.1:8787';
 const player = () => randomBytes(24).toString('hex');
 async function post(path, body) {
   return fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 }
-const seedFor = i => 's1-' + i.toString(16).padStart(8, '0');
-const score = (id, seed, milliseconds = 50000) => ({player: id, name: 'Test friend', seed,
-  milliseconds, mistakes: 0, solutions: seededBoards(seed).map(findSet)});
+const seedFor = i => 's2-' + i.toString(16).padStart(8, '0');
+const score = (id, seed, milliseconds = 50000) => {
+  const run = new SeededRun(seed);
+  const solutions = [];
+  for (let i = 0; i < 5; i++) {
+    const solution = findSet(run.board);
+    solutions.push(solution);
+    run.pick(solution);
+  }
+  return {player: id, name: 'Test friend', seed, milliseconds, mistakes: 0, solutions};
+};
 
 test('scores: more than five, per-player filter, seed filter, immutable/idempotent submissions', async () => {
   const id = player();
-  const seed = 's1-' + randomBytes(4).toString('hex');
+  const seed = 's2-' + randomBytes(4).toString('hex');
   const body = score(id, seed, 12345);
   assert.equal((await post('/scores', body)).status, 200);
   assert.equal((await post('/scores', body)).status, 200);
@@ -29,6 +37,12 @@ test('scores: more than five, per-player filter, seed filter, immutable/idempote
   assert.ok(all.scores.length >= 13);
   assert.ok(unique.scores.length < all.scores.length);
   assert.equal((await fetch(base + '/scores?seed=nope')).status, 400);
+  const legacySeed = seed.replace('s2-', 's1-');
+  assert.equal((await post('/scores', score(id, legacySeed, 1))).status, 200);
+  const legacy = await (await fetch(base + '/scores?seed=' + legacySeed)).json();
+  assert.equal(legacy.scores.length, 1);
+  const current = await (await fetch(base + '/scores?unique=false')).json();
+  assert.ok(current.scores.every(row => row.seed.startsWith('s2-')));
 });
 
 class Client {
@@ -73,11 +87,20 @@ test('two-player race: countdown, identical boards, validation, reconnect and wi
     first.send({type: 'pick', round: 0, cards: [0, 0, 0]});
     await first.wait(s => s.players[s.you].mistakes === 1);
     assert.equal(first.state.players[first.state.you].progress, 0);
-    first.send({type: 'pick', round: 0, cards: findSet(first.state.board)});
+    assert.match(first.state.seed, /^s2-/);
+    const starting = [...first.state.board];
+    const solution = findSet(starting);
+    first.send({type: 'pick', round: 0, cards: solution});
     await first.wait(s => s.players[s.you].progress === 1);
+    const nextBoard = [...first.state.board];
+    for (let i = 0; i < 12; i++) {
+      if (!solution.includes(starting[i])) assert.equal(nextBoard[i], starting[i]);
+    }
+    assert.deepEqual(second.state.board, starting);
     first.close();
     reconnect = new Client(room, id, 'Alice');
     await reconnect.wait(s => s.players[s.you].progress === 1);
+    assert.deepEqual(reconnect.state.board, nextBoard);
     reconnect.send({type: 'pick', round: 0, cards: findSet(reconnect.state.board)});
     await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal(reconnect.state.players[reconnect.state.you].progress, 1);

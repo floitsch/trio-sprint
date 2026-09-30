@@ -24,30 +24,28 @@ void main() {
       normalizeSeed('https://example.com/?seed=S1-1234ABCD'),
       's1-1234abcd',
     );
-    expect(normalizeSeed('s2-1234abcd'), isNull);
+    expect(normalizeSeed('s2-1234abcd'), 's2-1234abcd');
+    expect(normalizeSeed('s3-1234abcd'), isNull);
   });
-  test(
-    'different choices on one seeded board do not change the next board',
-    () {
-      final first = SetGame(seed: 's1-1234abcd');
-      final second = SetGame(seed: 's1-1234abcd');
-      final a = findSet(first.board)!;
-      final b = findSet(second.board.reversed.toList())!;
-      for (final card in a) {
+  test('legacy s1 seeds retain independent boards', () {
+    final first = SetGame(seed: 's1-1234abcd');
+    final second = SetGame(seed: 's1-1234abcd');
+    final a = findSet(first.board)!;
+    final b = findSet(second.board.reversed.toList())!;
+    for (final card in a) {
+      first.pick(card.id);
+    }
+    for (final card in b) {
+      second.pick(card.id);
+    }
+    expect(first.board.map((c) => c.id), second.board.map((c) => c.id));
+    for (var i = 1; i < 5; i++) {
+      for (final card in findSet(first.board)!) {
         first.pick(card.id);
       }
-      for (final card in b) {
-        second.pick(card.id);
-      }
-      expect(first.board.map((c) => c.id), second.board.map((c) => c.id));
-      for (var i = 1; i < 5; i++) {
-        for (final card in findSet(first.board)!) {
-          first.pick(card.id);
-        }
-      }
-      expect(first.finished, isTrue);
-    },
-  );
+    }
+    expect(first.finished, isTrue);
+  });
   test('all training targets are solvable and third-card exercises have one answer', () {
     for (var count = 1; count <= 4; count++) {
       for (final pair in [true, false]) {

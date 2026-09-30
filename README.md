@@ -4,16 +4,26 @@
 **[Download for Android](https://github.com/floitsch/trio-sprint/releases/latest/download/trio-sprint.apk)**
 
 A Flutter pattern game: find **five sets** with a two-second countdown before
-cards appear and the stopwatch starts. Each round has a fresh 12-card board.
+cards appear and the stopwatch starts. Start with 12 cards; each found set is
+replaced by three cards while the other nine stay in place. Abandon returns to
+the start screen during either the countdown or play, without restoring seed
+eligibility.
+
 For every feature — number, shape, color, fill — the three cards must be all the
 same or all different. Wrong trios count as mistakes while the clock continues.
 Leaving the app does not pause the stopwatch.
 
-- **Seeds:** every sprint uses a versioned seed, such as `s1-1234abcd`. Share a
-  link or paste a seed/link into **Run a seed**. Everyone gets the same five
-  boards, independent of the sets they choose. Seed algorithm versions are
-  permanent; changing the algorithm requires a new prefix.
-- **High scores:** fastest 100 runs, across all seeds or for one seed. Toggle
+- **Seeds:** every sprint uses a versioned seed, such as `s2-1234abcd`. Share a
+  link or paste a seed/link into **Run a seed**. A seed fixes the starting board
+  and deck for the entire five-set run. The sets
+  you choose affect later boards; replaying the same choices reproduces the run.
+  Dealing follows board positions, not tap order. If no set remains, only newly
+  dealt positions are changed until the board is solvable. Seed algorithm
+  versions are
+  permanent; changing the algorithm requires a new prefix. Old `s1` links retain
+  their original five-board rules. Their scores are accessible by seed, separate
+  from the current leaderboard and personal best.
+- **High scores:** fastest 100 runs, across current seeds or for one seed. Toggle
   **Only each player’s best** to hide additional runs from the same player ID.
   Nicknames and random player IDs are remembered on each device, without login.
   First-attempt personal bests also persist locally.
@@ -35,9 +45,11 @@ Leaving the app does not pause the stopwatch.
   seconds per mistake and 15 seconds for a hint or skip. Repeated boards keep
   the latest attempt. History stays on this device and works offline; time in
   the background does not affect this practice ranking or pause a sprint score.
-- **1 vs 1:** share a room link/code, ready up, and race through the same five
-  boards. A Cloudflare room validates claims and chooses the winner. Reconnect
-  with the same device to resume; leaving forfeits a started race. Rooms expire
+- **1 vs 1:** share a room link/code, ready up, and race to find five sets
+  from the same starting board and seeded deck. Each player keeps their own
+  evolving board; reconnecting on the same device restores their exact choices.
+  A Cloudflare room validates claims and chooses the winner. Leaving forfeits a
+  started race. Rooms expire
   after one hour. Race boards count as seen seeds and do not award solo scores.
 
 Solo play and training work offline once the app assets have downloaded. High

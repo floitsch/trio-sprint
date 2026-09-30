@@ -30,7 +30,9 @@ class PlayerData {
 
   String get player => preferences.getString('player')!;
   String get nickname => preferences.getString('nickname') ?? '';
-  int? get best => preferences.getInt('best');
+  int? get best => preferences.getInt('best-s2');
+  int? bestForSeed(String seed) =>
+      preferences.getInt(seed.startsWith('s1-') ? 'best' : 'best-s2');
   bool get unique => preferences.getBool('unique') ?? true;
   Future<void> setNickname(String name) async {
     await preferences.setString('nickname', name.trim());
@@ -40,9 +42,13 @@ class PlayerData {
     await preferences.setBool('unique', value);
   }
 
-  Future<void> saveBest(int milliseconds) async {
-    if (best == null || milliseconds < best!) {
-      await preferences.setInt('best', milliseconds);
+  Future<void> saveBest(int milliseconds, {String seed = 's2-'}) async {
+    final previous = bestForSeed(seed);
+    if (previous == null || milliseconds < previous) {
+      await preferences.setInt(
+        seed.startsWith('s1-') ? 'best' : 'best-s2',
+        milliseconds,
+      );
     }
   }
 

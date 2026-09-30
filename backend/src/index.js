@@ -1,6 +1,6 @@
 // Copyright (C) 2026 Toit contributors.
 import { DurableObject } from 'cloudflare:workers';
-import { isSet, seededBoards, validName, validPlayer, validSeed, validateScore } from './game.js';
+import { SeededRun, seededBoards, validName, validPlayer, validSeed, validateScore } from './game.js';
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
@@ -35,7 +35,7 @@ export default {
       if (url.pathname === '/scores' && request.method === 'GET') {
         const seed = url.searchParams.get('seed');
         if (seed && !validSeed(seed)) return json({ error: 'Invalid seed' }, 400);
-        const where = seed ? 'WHERE seed = ?' : '';
+        const where = seed ? 'WHERE seed = ?' : "WHERE seed LIKE 's2-%'";
         const unique = url.searchParams.get('unique') !== 'false';
         const query = unique
           ? `SELECT name, seed, milliseconds, mistakes FROM (
@@ -95,7 +95,7 @@ export class RaceRoom extends DurableObject {
   async fetch(request) {
     if (new URL(request.url).pathname === '/create') {
       if (this.game) return json({ error: 'Room already exists' }, 409);
-      const seed = 's1-' + crypto.getRandomValues(new Uint32Array(1))[0].toString(16).padStart(8, '0');
+      const seed = 's2-' + crypto.getRandomValues(new Uint32Array(1))[0].toString(16).padStart(8, '0');
       this.game = { seed, players: [], startAt: null, winner: null, ended: false, expires: Date.now() + 3600000 };
       await this.save();
       await this.ctx.storage.setAlarm(this.game.expires);
@@ -110,7 +110,7 @@ export class RaceRoom extends DurableObject {
     let player = this.game.players.find(p => p.token === token);
     if (!player) {
       if (this.game.players.length >= 2 || this.game.startAt || this.game.ended) return json({ error: 'Room is full or finished' }, 409);
-      player = { token, name: name.trim(), progress: 0, mistakes: 0, ready: false };
+      player = { token, name: name.trim(), progress: 0, mistakes: 0, ready: false, solutions: [] };
       this.game.players.push(player);
       await this.save();
     }
@@ -121,6 +121,17 @@ export class RaceRoom extends DurableObject {
     this.broadcast();
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
+  runFor(player) {
+    const run = new SeededRun(this.game.seed);
+    // Rooms already in progress at deployment retain their original boards.
+    if (this.game.seed.startsWith('s1-')) {
+      run.progress = player.progress;
+      run.board = seededBoards(this.game.seed)[player.progress] ?? [];
+    } else {
+      for (const solution of player.solutions) run.pick(solution);
+    }
+    return run;
+  }
   state(token) {
     const game = this.game;
     const own = game.players.find(p => p.token === token);
@@ -128,7 +139,7 @@ export class RaceRoom extends DurableObject {
     return { type: 'state', now: Date.now(), startAt: game.startAt, ended: game.ended,
       winner: game.winner, you: game.players.indexOf(own),
       seed: started || game.ended ? game.seed : null,
-      board: started && !game.ended ? seededBoards(game.seed)[own.progress] ?? [] : [],
+      board: started && !game.ended ? this.runFor(own).board : [],
       players: game.players.map(p => ({ name: p.name, progress: p.progress, mistakes: p.mistakes,
         ready: p.ready, connected: this.ctx.getWebSockets(p.token).length > 0 })),
     };
@@ -155,8 +166,9 @@ export class RaceRoom extends DurableObject {
       }
     } else if (data.type === 'pick' && this.game.startAt && Date.now() >= this.game.startAt) {
       if (data.round !== player.progress) { this.broadcast(); return; }
-      const board = seededBoards(this.game.seed)[player.progress];
-      if (isSet(data.cards) && data.cards.every(c => board.includes(c))) {
+      const run = this.runFor(player);
+      if (run.pick(data.cards)) {
+        (player.solutions ??= []).push(data.cards);
         player.progress++;
         if (player.progress === 5) {
           this.game.ended = true;

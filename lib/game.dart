@@ -52,6 +52,7 @@ class SetGame {
   final Random _random;
   final String? seed;
   List<List<SetCard>>? _rounds;
+  SeedRandom? _seedRandom;
   final List<SetCard> board = [];
   final List<SetCard> _deck = [];
   final Set<int> selected = {};
@@ -64,14 +65,23 @@ class SetGame {
     mistakes = 0;
     selected.clear();
     board.clear();
-    if (seed != null) {
+    _rounds = null;
+    _seedRandom = null;
+    if (seed != null && normalizeSeed(seed!) != seed) {
+      throw ArgumentError('Invalid seed');
+    }
+    if (seed?.startsWith('s1-') == true) {
       _rounds = seededBoards(seed!);
       board.addAll(_rounds!.first);
       return;
     }
+    if (seed != null) {
+      _seedRandom = SeedRandom(int.parse(seed!.substring(3), radix: 16));
+    }
     _deck
       ..clear()
-      ..addAll(List.generate(81, SetCard.new)..shuffle(_random));
+      ..addAll(List.generate(81, SetCard.new));
+    _shuffleDeck();
     _deal(12);
     _ensureSet(const [9, 10, 11]);
   }
@@ -121,7 +131,26 @@ class SetGame {
   }
 
   void _ensureSet(List<int> lastDealtPositions) {
+    var attempts = 0;
     while (findSet(board) == null) {
+      if (attempts++ == 100) {
+        // A bounded fallback: keep the other nine cards and complete a pair
+        // among them. Only a newly dealt position may change.
+        final kept = [
+          for (var i = 0; i < board.length; i++)
+            if (!lastDealtPositions.contains(i)) board[i],
+        ];
+        var id = 0;
+        var place = 1;
+        for (var i = 0; i < 4; i++) {
+          id +=
+              ((6 - kept[0].attributes[i] - kept[1].attributes[i]) % 3) * place;
+          place *= 3;
+        }
+        board[lastDealtPositions.first] = SetCard(id);
+        _deck.removeWhere((card) => card.id == id);
+        return;
+      }
       if (_deck.length < 3) _refreshDeck();
       for (final position in lastDealtPositions) {
         board[position] = _deck.removeLast();
@@ -138,8 +167,16 @@ class SetGame {
           81,
           SetCard.new,
         ).where((card) => !boardIds.contains(card.id)),
-      )
-      ..shuffle(_random);
+      );
+    _shuffleDeck();
+  }
+
+  void _shuffleDeck() {
+    if (_seedRandom != null) {
+      _seedRandom!.shuffle(_deck);
+    } else {
+      _deck.shuffle(_random);
+    }
   }
 }
 
@@ -151,8 +188,8 @@ String formatTime(Duration duration) {
   return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}.$fraction';
 }
 
-/// s1 uses an explicitly specified PRNG and shuffle, shared with the server.
-/// Never change this algorithm without introducing a new seed version.
+/// Versioned runs use an explicitly specified PRNG and shuffle, shared with
+/// the server. Never change an algorithm without a new seed version.
 class SeedRandom {
   SeedRandom(this.state);
   int state;
@@ -175,14 +212,16 @@ String? normalizeSeed(String value) {
   final trimmed = value.trim();
   final uri = Uri.tryParse(trimmed);
   final seed = (uri?.queryParameters['seed'] ?? trimmed).toLowerCase();
-  return RegExp(r'^s1-[0-9a-f]{8}$').hasMatch(seed) ? seed : null;
+  return RegExp(r'^s[12]-[0-9a-f]{8}$').hasMatch(seed) ? seed : null;
 }
 
 String newSeed() =>
-    's1-${Random.secure().nextInt(0x100000000).toRadixString(16).padLeft(8, '0')}';
+    's2-${Random.secure().nextInt(0x100000000).toRadixString(16).padLeft(8, '0')}';
 
 List<List<SetCard>> seededBoards(String seed) {
-  if (normalizeSeed(seed) != seed) throw ArgumentError('Invalid seed');
+  if (normalizeSeed(seed) != seed || !seed.startsWith('s1-')) {
+    throw ArgumentError('Only legacy s1 seeds have independent boards');
+  }
   final random = SeedRandom(int.parse(seed.substring(3), radix: 16));
   return List.generate(5, (_) {
     for (var attempt = 0; attempt < 100; attempt++) {
