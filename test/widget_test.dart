@@ -223,6 +223,10 @@ void main() {
     await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
+    final preferences = await SharedPreferences.getInstance();
+    final firstAttempt = preferences.getKeys().singleWhere(
+      (key) => key.startsWith('attempt:'),
+    );
     await tester.tap(find.byTooltip('Restart run'));
     await tester.pumpAndSettle();
     await tester.pump();
@@ -232,6 +236,16 @@ void main() {
     expect(find.byKey(const ValueKey('timer')), findsNothing);
     await tester.pump(const Duration(seconds: 1));
     expect(find.byKey(const ValueKey('timer')), findsOneWidget);
+    final attempts = preferences
+        .getKeys()
+        .where((key) => key.startsWith('attempt:'))
+        .toSet();
+    expect(attempts, hasLength(2));
+    final freshSeed = attempts
+        .difference({firstAttempt})
+        .single
+        .substring('attempt:'.length);
+    expect(find.text('First attempt · $freshSeed'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 

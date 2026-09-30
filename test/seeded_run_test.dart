@@ -88,6 +88,46 @@ void main() {
     expect(player.bestForSeed('s1-1234abcd'), 500);
   });
 
+  testWidgets(
+    'restart uses a fresh seed while replay keeps the completed seed',
+    (tester) async {
+      await tester.pumpWidget(const TrioSprintApp());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Start run'));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      String shownSeed() => tester
+          .widgetList<Text>(find.byType(Text))
+          .map((text) => text.data ?? '')
+          .singleWhere((text) => text.startsWith('First attempt · '))
+          .split(' · ')
+          .last;
+      final original = shownSeed();
+      await tester.tap(find.byTooltip('Restart run'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 2));
+      final fresh = shownSeed();
+      expect(fresh, isNot(original));
+      for (var round = 0; round < 5; round++) {
+        final cards = tester
+            .widgetList<CardView>(find.byType(CardView))
+            .map((view) => view.card)
+            .toList();
+        for (final card in findSet(cards)!) {
+          await tester.tap(find.byKey(ValueKey('card-${card.id}')));
+          await tester.pump();
+        }
+      }
+      await tester.ensureVisible(find.text('Replay seed (practice)'));
+      await tester.tap(find.text('Replay seed (practice)'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text('Practice replay · $fresh'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   for (final duringCountdown in [true, false]) {
     testWidgets(
       'abandon cancels the run and preserves first-attempt status; countdown=$duringCountdown',

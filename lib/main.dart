@@ -523,7 +523,7 @@ class _GameScreenState extends State<GameScreen> {
                         ),
                         IconButton(
                           tooltip: 'Restart run',
-                          onPressed: () => start(seed: game.seed),
+                          onPressed: start,
                           icon: const Icon(Icons.refresh_rounded),
                         ),
                       ] else

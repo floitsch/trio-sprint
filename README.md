@@ -22,9 +22,11 @@ Leaving the app does not pause the stopwatch.
   versions are
   permanent; changing the algorithm requires a new prefix. Old `s1` links retain
   their original five-board rules. Their scores are accessible by seed, separate
-  from the current leaderboard and personal best.
+  from the current leaderboard and personal best. **Restart** starts a fresh
+  seed; **Replay seed (practice)** repeats the same one.
 - **High scores:** fastest 100 runs, across current seeds or for one seed. Toggle
   **Only each player’s best** to hide additional runs from the same player ID.
+  Deployments preserve the D1 database and its existing scores.
   Nicknames and random player IDs are remembered on each device, without login.
   First-attempt personal bests also persist locally.
 - **First attempts only:** starting a seed consumes its eligibility, including
