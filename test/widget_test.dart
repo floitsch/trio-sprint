@@ -50,10 +50,13 @@ void main() {
       await tester.tap(find.text('Training'));
       await tester.pumpAndSettle();
       expect(find.text('Find the third card'), findsOneWidget);
-      expect(find.byType(CardView), findsNWidgets(12));
+      expect(find.byType(CardView), findsNothing);
       await tester.tap(find.byType(Switch));
+      await tester.tap(find.text('Start training'));
       await tester.pumpAndSettle();
       expect(find.byType(CardView), findsNWidgets(8));
+      await tester.tap(find.text('Quit'));
+      await tester.pumpAndSettle();
       await tester.pageBack();
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Install app'));

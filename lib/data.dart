@@ -4,6 +4,8 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'practice.dart';
+
 import 'attempt_stub.dart'
     if (dart.library.js_interop) 'attempt_web.dart'
     as attempts;
@@ -47,6 +49,38 @@ class PlayerData {
   Future<bool> claimSeed(String seed) async {
     // Record at START, not at submission: abandoned runs count as attempts.
     return attempts.claimSeed(preferences, seed);
+  }
+
+  List<PracticeBoard> get practiceHistory {
+    final boards = <PracticeBoard>[];
+    for (final raw
+        in preferences.getStringList('practice-history-v1') ?? <String>[]) {
+      try {
+        boards.add(
+          PracticeBoard.fromJson(jsonDecode(raw) as Map<String, dynamic>),
+        );
+      } catch (_) {
+        // One damaged entry must not prevent playing or reviewing other boards.
+      }
+    }
+    return boards;
+  }
+
+  List<PracticeBoard> get slowBoards {
+    final boards = practiceHistory
+      ..sort((a, b) => b.difficulty.compareTo(a.difficulty));
+    return boards.take(20).toList();
+  }
+
+  Future<void> recordPractice(PracticeBoard board) async {
+    final boards = practiceHistory..removeWhere((old) => old.key == board.key);
+    boards.insert(0, board);
+    if (!await preferences.setStringList(
+      'practice-history-v1',
+      boards.take(100).map((entry) => jsonEncode(entry.toJson())).toList(),
+    )) {
+      throw StateError('Could not save practice history.');
+    }
   }
 }
 

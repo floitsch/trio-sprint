@@ -27,8 +27,14 @@ Leaving the app does not pause the stopwatch.
   and seed; retries of the same submission are safe. This is an honor system:
   clearing site data or switching devices creates a new identity, and submitted
   solo times are trusted. Identical nicknames do not merge different identities.
-- **Training:** choose 1–4 different features, find a set on a board or complete
-  a pair, and use hints and per-feature explanations. Untimed and offline.
+- **Training:** choose 1–4 different features, then find sets on full boards or
+  complete pairs. Correct answers automatically bring fresh cards until you
+  quit. Portrait cards fit the available screen; hints and skipping are available.
+  **Cards I was slow on** revisits the 20 hardest of your last 100 saved boards
+  from sprints, races and training. Ranking uses active viewing time, plus five
+  seconds per mistake and 15 seconds for a hint or skip. Repeated boards keep
+  the latest attempt. History stays on this device and works offline; time in
+  the background does not affect this practice ranking or pause a sprint score.
 - **1 vs 1:** share a room link/code, ready up, and race through the same five
   boards. A Cloudflare room validates claims and chooses the winner. Reconnect
   with the same device to resume; leaving forfeits a started race. Rooms expire

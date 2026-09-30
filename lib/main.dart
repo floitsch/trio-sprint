@@ -10,6 +10,7 @@ import 'leaderboard.dart';
 import 'training.dart';
 import 'race.dart';
 import 'install.dart';
+import 'practice.dart';
 
 void main() => runApp(const TrioSprintApp());
 
@@ -65,6 +66,24 @@ class _GameScreenState extends State<GameScreen> {
   bool submitted = false;
   bool submitting = false;
   final solutions = <List<int>>[];
+  final boardClock = BoardClock();
+  int boardMistakes = 0;
+
+  void rememberBoard() {
+    if (!boardClock.active) return;
+    boardClock.stop();
+    player
+        ?.recordPractice(
+          PracticeBoard(
+            cards: game.board.map((card) => card.id).toList(),
+            milliseconds: boardClock.milliseconds,
+            mistakes: boardMistakes,
+          ),
+        )
+        .catchError((Object error) {
+          /* History must not interrupt a sprint. */
+        });
+  }
 
   @override
   void initState() {
@@ -261,6 +280,9 @@ class _GameScreenState extends State<GameScreen> {
   Future<void> start({String? seed}) async {
     if (starting || submitting) return;
     starting = true;
+    if (boardClock.milliseconds >= 10000 || boardMistakes > 0) rememberBoard();
+    boardClock.stop();
+    boardMistakes = 0;
     ticker?.cancel();
     countdownTimer?.cancel();
     watch.stop();
@@ -299,6 +321,7 @@ class _GameScreenState extends State<GameScreen> {
       } else {
         timer.cancel();
         watch.start();
+        boardClock.start();
         setState(() => phase = Phase.playing);
         ticker = Timer.periodic(const Duration(milliseconds: 33), (_) {
           elapsed.value = watch.elapsed;
@@ -311,15 +334,21 @@ class _GameScreenState extends State<GameScreen> {
     if (phase != Phase.playing || starting) return;
     setState(() {
       final attempt = [...game.selected, card.id];
+      if (attempt.length == 3 && isSet(attempt.map(SetCard.new).toList())) {
+        rememberBoard();
+      }
       final result = game.pick(card.id);
       if (result == PickResult.correct || result == PickResult.finished) {
         solutions.add(attempt);
       }
       switch (result) {
         case PickResult.wrong:
+          boardMistakes++;
           feedback = 'Not a set. Keep going!';
           HapticFeedback.lightImpact();
         case PickResult.correct:
+          boardMistakes = 0;
+          boardClock.start();
           feedback = '${game.streak} down. ${5 - game.streak} to go.';
           HapticFeedback.selectionClick();
         case PickResult.finished:
@@ -344,6 +373,7 @@ class _GameScreenState extends State<GameScreen> {
     ticker?.cancel();
     countdownTimer?.cancel();
     watch.stop();
+    boardClock.dispose();
     elapsed.dispose();
     super.dispose();
   }
@@ -592,7 +622,7 @@ class _GameScreenState extends State<GameScreen> {
         TextButton(
           onPressed: () => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const TrainingScreen()),
+            MaterialPageRoute(builder: (_) => TrainingScreen(player: player)),
           ),
           child: const Text('Training'),
         ),

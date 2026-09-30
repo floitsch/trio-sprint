@@ -8,6 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'card_view.dart';
 import 'data.dart';
 import 'game.dart';
+import 'practice.dart';
 
 class RaceScreen extends StatefulWidget {
   const RaceScreen({super.key, required this.player, this.room});
@@ -32,6 +33,38 @@ class _RaceScreenState extends State<RaceScreen> {
   int clockOffset = 0;
   String? recordedSeed;
   final code = TextEditingController();
+  final boardClock = BoardClock();
+  PracticeBoard? trackedBoard;
+  int boardMistakes = 0;
+
+  void syncPracticeClock() {
+    final startAt = state?['startAt'] as int?;
+    final board = (state?['board'] as List<dynamic>?)?.cast<int>();
+    if (!connected ||
+        state?['ended'] == true ||
+        startAt == null ||
+        DateTime.now().millisecondsSinceEpoch + clockOffset < startAt ||
+        board == null ||
+        board.length != 12 ||
+        boardClock.active) {
+      return;
+    }
+    trackedBoard = PracticeBoard(cards: [...board]);
+    boardMistakes = 0;
+    boardClock.start();
+  }
+
+  void rememberBoard() {
+    if (!boardClock.active || trackedBoard == null) return;
+    boardClock.stop();
+    widget.player
+        .recordPractice(
+          trackedBoard!.result(boardClock.milliseconds, boardMistakes, false),
+        )
+        .catchError((Object error) {
+          /* History must not interrupt a race. */
+        });
+  }
 
   @override
   void initState() {
@@ -42,6 +75,7 @@ class _RaceScreenState extends State<RaceScreen> {
     }
     countdown = Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (mounted && state?['startAt'] != null && state?['ended'] != true) {
+        syncPracticeClock();
         setState(() {});
       }
     });
@@ -99,10 +133,23 @@ class _RaceScreenState extends State<RaceScreen> {
                 widget.player.claimSeed(seed).catchError((_) => false);
               }
               final oldProgress = ownProgress;
+              final nextYou = message['you'] as int? ?? -1;
+              final nextPlayers = message['players'] as List<dynamic>;
+              final nextProgress = nextYou < 0
+                  ? 0
+                  : nextPlayers[nextYou]['progress'] as int;
+              if (nextProgress > oldProgress) rememberBoard();
+              if (message['ended'] == true) {
+                if (boardClock.milliseconds >= 10000 || boardMistakes > 0) {
+                  rememberBoard();
+                }
+                boardClock.stop();
+              }
               state = message;
               clockOffset =
                   (message['now'] as int) -
                   DateTime.now().millisecondsSinceEpoch;
+              syncPracticeClock();
               if (oldProgress != ownProgress ||
                   waiting ||
                   message['ended'] == true) {
@@ -127,6 +174,7 @@ class _RaceScreenState extends State<RaceScreen> {
       setState(() {
         connected = true;
         connecting = false;
+        syncPracticeClock();
       });
     } catch (_) {
       disconnected();
@@ -135,6 +183,7 @@ class _RaceScreenState extends State<RaceScreen> {
 
   void disconnected() {
     if (!mounted || leaving) return;
+    boardClock.stop();
     setState(() {
       connected = false;
       connecting = false;
@@ -157,6 +206,7 @@ class _RaceScreenState extends State<RaceScreen> {
       if (selected.remove(id)) return;
       selected.add(id);
       if (selected.length == 3) {
+        if (!isSet(selected.map(SetCard.new).toList())) boardMistakes++;
         waiting = true;
         feedback = '';
         send({
@@ -169,6 +219,8 @@ class _RaceScreenState extends State<RaceScreen> {
   }
 
   Future<void> leave() async {
+    if (boardClock.milliseconds >= 10000 || boardMistakes > 0) rememberBoard();
+    boardClock.stop();
     leaving = true;
     send({'type': 'leave'});
     if (mounted) Navigator.pop(context);
@@ -181,6 +233,7 @@ class _RaceScreenState extends State<RaceScreen> {
     subscription?.cancel();
     channel?.sink.close();
     code.dispose();
+    boardClock.dispose();
     super.dispose();
   }
 
