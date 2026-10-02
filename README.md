@@ -30,6 +30,8 @@ Leaving the app does not pause the stopwatch.
   seed; **Replay seed (practice)** repeats the same one.
 - **High scores:** fastest 100 runs, across current seeds or for one seed. Toggle
   **Only each player’s best** to hide additional runs from the same player ID.
+  Tap a score to play its seed or copy its link. Set or change your nickname
+  at the top of the high scores; a new name applies to future scores.
   Deployments preserve the D1 database and its existing scores.
   Nicknames and random player IDs are remembered on each device, without login.
   First-attempt personal bests also persist locally.
@@ -48,8 +50,11 @@ Leaving the app does not pause the stopwatch.
   abandoned runs and countdown restarts. Replays are practice. Browser Web Locks
   serialize claims across tabs, and local storage remembers them across visits.
   Android uses persistent preferences. Storage failures make runs practice-only.
-  After a first attempt finishes, players can opt into submitting it and confirm
-  that they have never run that seed before, including on another device.
+  Runs of freshly generated seeds are first attempts by construction. For any
+  other seed (typed, linked or from the high scores) that this device has not
+  started yet, the app asks before the countdown whether it is the player's
+  first time, including on other devices. Finished first attempts upload
+  automatically once a nickname is set; otherwise the results ask for one.
   The server validates all five solutions and allows only one score per player
   (including linked devices) and seed; retries of the same submission are safe. This is an honor system:
   clearing site data or switching devices creates a new identity, and submitted

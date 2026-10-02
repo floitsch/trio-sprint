@@ -6,3 +6,8 @@ Future<bool> claimSeed(SharedPreferences preferences, String seed) async {
   if (preferences.containsKey(key)) return false;
   return preferences.setBool(key, true);
 }
+
+Future<bool> hasAttempted(SharedPreferences preferences, String seed) async {
+  await preferences.reload();
+  return preferences.containsKey('attempt:$seed');
+}

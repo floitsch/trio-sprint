@@ -66,6 +66,10 @@ class PlayerData {
     return attempts.claimSeed(preferences, seed);
   }
 
+  /// Whether this device has started [seed] before, without claiming it.
+  Future<bool> hasAttempted(String seed) =>
+      attempts.hasAttempted(preferences, seed);
+
   List<PracticeBoard> get practiceHistory {
     final boards = <PracticeBoard>[];
     for (final raw

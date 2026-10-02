@@ -144,21 +144,12 @@ class _GameScreenState extends State<GameScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Run a seed'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(
-                hintText: 's2-1234abcd or a shared link',
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Only submit a score the first time you ever run a seed. Restarts and unfinished attempts count too.',
-            ),
-          ],
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 's2-1234abcd or a shared link',
+          ),
         ),
         actions: [
           TextButton(
@@ -186,38 +177,17 @@ class _GameScreenState extends State<GameScreen> {
       message('Device storage is needed for online play.');
       return false;
     }
-    final controller = TextEditingController(text: player!.nickname);
-    final name = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Your nickname'),
-        content: TextField(
-          controller: controller,
-          maxLength: 24,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'What should your friends see?',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (controller.text.trim().isNotEmpty) {
-                Navigator.pop(context, controller.text.trim());
-              }
-            },
-            child: const Text('Continue'),
-          ),
-        ],
+    return await editNickname(context, player!) && mounted;
+  }
+
+  Future<void> openLeaderboard({String? seed}) async {
+    final chosen = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LeaderboardScreen(player: player, seed: seed),
       ),
     );
-    if (name == null || !mounted) return false;
-    await player!.setNickname(name);
-    return mounted;
+    if (chosen != null && mounted) await start(seed: chosen);
   }
 
   Future<void> openRace({String? room}) async {
@@ -234,52 +204,62 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
-  Future<void> submitScore() async {
+  /// Uploads an eligible run. Automatic uploads happen silently once a
+  /// nickname is known; otherwise the results button asks for one.
+  Future<void> submitScore({bool automatic = false}) async {
     if (!eligible || submitted || submitting || player == null) return;
     if (!OnlineApi().configured) {
-      message('Online scores are not configured yet.');
+      if (!automatic) message('Online scores are not configured yet.');
       return;
     }
+    if (automatic && player!.nickname.isEmpty) return;
+    final seed = game.seed!;
+    final milliseconds = watch.elapsedMilliseconds;
+    final mistakes = game.mistakes;
+    final solved = [...solutions];
     setState(() => submitting = true);
     try {
-      if (!await askName() || !mounted) return;
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Submit this first attempt?'),
-          content: const Text(
-            'Only submit if this was the FIRST time you ever ran this seed, including on other devices. Replays are practice, even if you clear browser data.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('My first attempt'),
-            ),
-          ],
-        ),
-      );
-      if (confirmed != true || !mounted) return;
+      if (player!.nickname.isEmpty && !await askName()) return;
       await OnlineApi().submit(
         player: player!,
-        seed: game.seed!,
-        milliseconds: watch.elapsedMilliseconds,
-        mistakes: game.mistakes,
-        solutions: solutions,
+        seed: seed,
+        milliseconds: milliseconds,
+        mistakes: mistakes,
+        solutions: solved,
       );
-      if (mounted) {
-        setState(() => submitted = true);
-        message('Score submitted!');
-      }
+      if (mounted) setState(() => submitted = true);
     } catch (error) {
       if (mounted) message('Could not submit. You can retry: $error');
     } finally {
       if (mounted) setState(() => submitting = false);
     }
   }
+
+  /// Asks whether a seed that did not originate here is new to the player.
+  /// Returns null if they would rather not run it.
+  Future<bool?> confirmFirstAttempt(String seed) => showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('First time on this seed?'),
+      content: Text(
+        'Only your first run of $seed, on any device, can enter the high scores. Have you played it before?',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Played before'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('First time'),
+        ),
+      ],
+    ),
+  );
 
   final watch = Stopwatch();
   final elapsed = ValueNotifier(Duration.zero);
@@ -304,10 +284,34 @@ class _GameScreenState extends State<GameScreen> {
     await loading;
     if (!mounted || generation != runGeneration) return;
     final chosenSeed = seed ?? pendingSeed ?? newSeed();
+    // A seed generated right here cannot have been run anywhere else. Others
+    // (typed, linked or from the high scores) might have been, so ask, unless
+    // this device already knows it is a replay.
+    var firstTime = seed == null && pendingSeed == null;
+    if (!firstTime && player != null) {
+      var known = false;
+      try {
+        known = await player!.hasAttempted(chosenSeed);
+      } catch (_) {
+        // Claiming below still fails closed if storage is unusable.
+      }
+      if (!mounted || generation != runGeneration) return;
+      if (!known) {
+        final answer = await confirmFirstAttempt(chosenSeed);
+        if (!mounted || generation != runGeneration) return;
+        if (answer == null) {
+          starting = false;
+          return;
+        }
+        firstTime = answer;
+      }
+    }
     pendingSeed = null;
     var firstAttempt = false;
     try {
-      firstAttempt = await player?.claimSeed(chosenSeed) ?? false;
+      // Claim even when not first: the seed is now attempted on this device.
+      final claimed = await player?.claimSeed(chosenSeed) ?? false;
+      firstAttempt = claimed && firstTime;
     } catch (_) {
       if (mounted) {
         message('Could not remember this attempt. This run is practice only.');
@@ -389,6 +393,7 @@ class _GameScreenState extends State<GameScreen> {
           }
           phase = Phase.finished;
           HapticFeedback.mediumImpact();
+          unawaited(submitScore(automatic: true));
         case PickResult.selected:
         case PickResult.deselected:
           feedback = game.selected.isEmpty
@@ -653,12 +658,7 @@ class _GameScreenState extends State<GameScreen> {
           child: const Text('Share a seed'),
         ),
         TextButton(
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => LeaderboardScreen(player: player),
-            ),
-          ),
+          onPressed: openLeaderboard,
           child: const Text('High scores'),
         ),
         TextButton(
@@ -928,22 +928,20 @@ class _GameScreenState extends State<GameScreen> {
     Padding(
       padding: const EdgeInsets.all(8),
       child: Text(
-        eligible
-            ? 'Only submit a score the first time you ever run this seed.'
-            : 'Practice replay. Only your first attempt can enter the leaderboard.',
+        !eligible
+            ? 'Practice replay. Only your first attempt can enter the leaderboard.'
+            : submitted
+            ? 'Score submitted as ${player!.nickname}.'
+            : submitting
+            ? 'Submitting your score…'
+            : 'First attempt. It can enter the high scores.',
         textAlign: TextAlign.center,
       ),
     ),
-    if (eligible)
+    if (eligible && !submitted && !submitting)
       OutlinedButton(
-        onPressed: submitted || submitting ? null : submitScore,
-        child: Text(
-          submitted
-              ? 'Score submitted'
-              : submitting
-              ? 'Submitting…'
-              : 'Submit high score',
-        ),
+        onPressed: submitScore,
+        child: const Text('Submit high score'),
       ),
     Wrap(
       alignment: WrapAlignment.center,
@@ -958,13 +956,7 @@ class _GameScreenState extends State<GameScreen> {
           child: const Text('Replay seed (practice)'),
         ),
         TextButton(
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) =>
-                  LeaderboardScreen(player: player, seed: game.seed),
-            ),
-          ),
+          onPressed: () => openLeaderboard(seed: game.seed),
           child: const Text('Seed high scores'),
         ),
       ],

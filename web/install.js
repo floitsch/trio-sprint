@@ -31,3 +31,5 @@ window.trioClaimSeed = async seed => {
     return true;
   });
 };
+window.trioSeedAttempted = seed =>
+  localStorage.getItem('trio-attempt:' + seed) !== null;

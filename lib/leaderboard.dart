@@ -5,6 +5,44 @@ import 'data.dart';
 import 'devices.dart';
 import 'game.dart';
 
+/// Asks for a nickname and stores it. Returns false if cancelled.
+Future<bool> editNickname(BuildContext context, PlayerData player) async {
+  final controller = TextEditingController(text: player.nickname);
+  final name = await showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Your nickname'),
+      content: TextField(
+        controller: controller,
+        maxLength: 24,
+        autofocus: true,
+        decoration: const InputDecoration(
+          hintText: 'What should your friends see?',
+          helperText: 'Shown on future scores.',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            if (controller.text.trim().isNotEmpty) {
+              Navigator.pop(context, controller.text.trim());
+            }
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+  if (name == null) return false;
+  await player.setNickname(name);
+  return true;
+}
+
+/// The leaderboard pops with a seed when the player chooses to run it.
 class LeaderboardScreen extends StatefulWidget {
   const LeaderboardScreen({super.key, required this.player, this.seed});
   final PlayerData? player;
@@ -56,6 +94,49 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     refresh();
   }
 
+  Future<void> seedActions(String rowSeed) async {
+    final played = await widget.player
+        ?.hasAttempted(rowSeed)
+        .catchError((Object _) => false);
+    if (!mounted) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.play_arrow_rounded),
+              title: Text('Play $rowSeed'),
+              subtitle: Text(
+                played == true
+                    ? 'You already played this seed here. This run is practice.'
+                    : 'Your first run of a seed can enter the high scores.',
+              ),
+              onTap: () => Navigator.pop(context, 'play'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.link_rounded),
+              title: const Text('Copy seed link'),
+              onTap: () => Navigator.pop(context, 'copy'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'play') {
+      Navigator.pop(context, rowSeed);
+    } else if (action == 'copy') {
+      await Clipboard.setData(ClipboardData(text: shareLink('seed', rowSeed)));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Seed link copied.')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
@@ -87,6 +168,23 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
         constraints: const BoxConstraints(maxWidth: 760),
         child: Column(
           children: [
+            if (widget.player case final player?)
+              ListTile(
+                leading: const Icon(Icons.badge_outlined),
+                title: Text(
+                  player.nickname.isEmpty
+                      ? 'No name yet'
+                      : 'Playing as ${player.nickname}',
+                ),
+                trailing: TextButton(
+                  onPressed: () async {
+                    if (await editNickname(context, player) && mounted) {
+                      setState(() {});
+                    }
+                  },
+                  child: Text(player.nickname.isEmpty ? 'Set name' : 'Change'),
+                ),
+              ),
             SwitchListTile(
               title: const Text('Only each player’s best'),
               subtitle: const Text(
@@ -159,20 +257,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                             fontSize: 20,
                           ),
                         ),
-                        onTap: () async {
-                          await Clipboard.setData(
-                            ClipboardData(text: shareLink('seed', row.seed)),
-                          );
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Seed link copied. Replays are practice.',
-                                ),
-                              ),
-                            );
-                          }
-                        },
+                        onTap: () => seedActions(row.seed),
                       );
                     },
                   );
