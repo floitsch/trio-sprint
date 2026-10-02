@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 
 root = Path('build/web')
+# Flutter's worker unregisters and reloads every page it controls. Nothing
+# should register it, and old cached bootstraps that try must get a 404.
+(root / 'flutter_service_worker.js').unlink(missing_ok=True)
 files = sorted(p for p in root.rglob('*') if p.is_file() and p.name not in {
     'sw.js', 'flutter_service_worker.js', '.last_build_id'
 } and p.suffix != '.map')
