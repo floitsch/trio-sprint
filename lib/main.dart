@@ -71,6 +71,9 @@ class _GameScreenState extends State<GameScreen> {
   final solutions = <List<int>>[];
   final boardClock = BoardClock();
   int boardMistakes = 0;
+  RunMode mode = RunMode.sprint;
+  // When the last set of a timed run was found.
+  Duration lastSet = Duration.zero;
 
   void rememberBoard() {
     if (!boardClock.active) return;
@@ -92,6 +95,7 @@ class _GameScreenState extends State<GameScreen> {
   void initState() {
     super.initState();
     pendingSeed = normalizeSeed(Uri.base.queryParameters['seed'] ?? '');
+    if (pendingSeed != null) mode = RunMode.of(pendingSeed!);
     loading = loadPlayer();
   }
 
@@ -102,6 +106,7 @@ class _GameScreenState extends State<GameScreen> {
       setState(() {
         player = loaded;
         if (loaded.best != null) best = Duration(milliseconds: loaded.best!);
+        if (pendingSeed == null) mode = loaded.mode;
       });
       final link = normalizeDeviceCode(Uri.base.queryParameters['link'] ?? '');
       final room = Uri.base.queryParameters['room'];
@@ -184,7 +189,8 @@ class _GameScreenState extends State<GameScreen> {
     final chosen = await Navigator.push<String>(
       context,
       MaterialPageRoute(
-        builder: (_) => LeaderboardScreen(player: player, seed: seed),
+        builder: (_) =>
+            LeaderboardScreen(player: player, seed: seed, mode: mode),
       ),
     );
     if (chosen != null && mounted) await start(seed: chosen);
@@ -207,14 +213,16 @@ class _GameScreenState extends State<GameScreen> {
   /// Uploads an eligible run. Automatic uploads happen silently once a
   /// nickname is known; otherwise the results button asks for one.
   Future<void> submitScore({bool automatic = false}) async {
-    if (!eligible || submitted || submitting || player == null) return;
+    if (!canSubmit || submitted || submitting || player == null) return;
     if (!OnlineApi().configured) {
       if (!automatic) message('Online scores are not configured yet.');
       return;
     }
     if (automatic && player!.nickname.isEmpty) return;
     final seed = game.seed!;
-    final milliseconds = watch.elapsedMilliseconds;
+    final milliseconds = game.mode.timed
+        ? lastSet.inMilliseconds
+        : watch.elapsedMilliseconds;
     final mistakes = game.mistakes;
     final solved = [...solutions];
     setState(() => submitting = true);
@@ -265,10 +273,23 @@ class _GameScreenState extends State<GameScreen> {
   final elapsed = ValueNotifier(Duration.zero);
   Timer? ticker;
   Timer? countdownTimer;
+  Timer? deadline;
   Phase phase = Phase.ready;
   int countdown = 2;
   Duration? best;
+  TimedScore? timedBest;
   bool newBest = false;
+
+  /// Timed runs without a set have nothing to enter into the high scores.
+  bool get canSubmit => eligible && (!game.mode.timed || game.streak > 0);
+
+  void stopClocks() {
+    ticker?.cancel();
+    countdownTimer?.cancel();
+    deadline?.cancel();
+    watch.stop();
+  }
+
   String feedback = 'Find a set. Find your rhythm.';
 
   Future<void> start({String? seed}) async {
@@ -278,12 +299,10 @@ class _GameScreenState extends State<GameScreen> {
     if (boardClock.milliseconds >= 10000 || boardMistakes > 0) rememberBoard();
     boardClock.stop();
     boardMistakes = 0;
-    ticker?.cancel();
-    countdownTimer?.cancel();
-    watch.stop();
+    stopClocks();
     await loading;
     if (!mounted || generation != runGeneration) return;
-    final chosenSeed = seed ?? pendingSeed ?? newSeed();
+    final chosenSeed = seed ?? pendingSeed ?? newSeed(mode);
     // A seed generated right here cannot have been run anywhere else. Others
     // (typed, linked or from the high scores) might have been, so ask, unless
     // this device already knows it is a replay.
@@ -322,16 +341,16 @@ class _GameScreenState extends State<GameScreen> {
     eligible = firstAttempt;
     submitted = false;
     solutions.clear();
-    ticker?.cancel();
-    countdownTimer?.cancel();
-    watch
-      ..stop()
-      ..reset();
+    lastSet = Duration.zero;
+    stopClocks();
+    watch.reset();
     elapsed.value = Duration.zero;
     setState(() {
       game = SetGame(seed: chosenSeed);
+      mode = game.mode;
       final previousBest = player?.bestForSeed(chosenSeed);
       best = previousBest == null ? null : Duration(milliseconds: previousBest);
+      timedBest = mode.timed ? player?.timedBest(mode) : null;
       countdown = 2;
       phase = Phase.countdown;
       feedback = 'Pick three cards that make a set.';
@@ -344,8 +363,12 @@ class _GameScreenState extends State<GameScreen> {
         watch.start();
         boardClock.start();
         setState(() => phase = Phase.playing);
+        final limit = game.mode.limit;
+        if (limit != null) deadline = Timer(limit, endTimedRun);
         ticker = Timer.periodic(const Duration(milliseconds: 33), (_) {
           elapsed.value = watch.elapsed;
+          // Timers may be late while the app is in the background.
+          if (limit != null && watch.elapsed >= limit) endTimedRun();
         });
       }
     });
@@ -354,16 +377,39 @@ class _GameScreenState extends State<GameScreen> {
   void abandon() {
     runGeneration++;
     starting = false;
-    ticker?.cancel();
-    countdownTimer?.cancel();
-    watch.stop();
+    stopClocks();
     if (boardClock.milliseconds >= 10000 || boardMistakes > 0) rememberBoard();
     boardClock.stop();
     setState(() => phase = Phase.ready);
   }
 
+  void endTimedRun() {
+    if (phase != Phase.playing || !game.mode.timed) return;
+    stopClocks();
+    elapsed.value = game.mode.limit!;
+    if (boardClock.milliseconds >= 10000 || boardMistakes > 0) rememberBoard();
+    boardClock.stop();
+    final score = TimedScore(game.streak, lastSet.inMilliseconds);
+    setState(() {
+      newBest = canSubmit && score.beats(timedBest);
+      if (newBest) {
+        timedBest = score;
+        player?.saveTimedBest(game.mode, score);
+      }
+      game.selected.clear();
+      phase = Phase.finished;
+    });
+    HapticFeedback.mediumImpact();
+    unawaited(submitScore(automatic: true));
+  }
+
   void pick(SetCard card) {
     if (phase != Phase.playing || starting) return;
+    final limit = game.mode.limit;
+    if (limit != null && watch.elapsed >= limit) {
+      endTimedRun();
+      return;
+    }
     setState(() {
       final attempt = [...game.selected, card.id];
       if (attempt.length == 3 && isSet(attempt.map(SetCard.new).toList())) {
@@ -381,11 +427,13 @@ class _GameScreenState extends State<GameScreen> {
         case PickResult.correct:
           boardMistakes = 0;
           boardClock.start();
-          feedback = '${game.streak} down. ${5 - game.streak} to go.';
+          lastSet = watch.elapsed;
+          feedback = game.mode.timed
+              ? '${game.streak} found. Keep going!'
+              : '${game.streak} down. ${5 - game.streak} to go.';
           HapticFeedback.selectionClick();
         case PickResult.finished:
-          watch.stop();
-          ticker?.cancel();
+          stopClocks();
           newBest = eligible && (best == null || watch.elapsed < best!);
           if (newBest) best = watch.elapsed;
           if (eligible) {
@@ -405,9 +453,7 @@ class _GameScreenState extends State<GameScreen> {
 
   @override
   void dispose() {
-    ticker?.cancel();
-    countdownTimer?.cancel();
-    watch.stop();
+    stopClocks();
     boardClock.dispose();
     elapsed.dispose();
     super.dispose();
@@ -466,6 +512,11 @@ class _GameScreenState extends State<GameScreen> {
               const SizedBox(height: 20),
               const Text(
                 'Get five sets in a row as fast as you can. A wrong trio counts as a mistake; the clock keeps running.',
+                style: TextStyle(fontSize: 16, height: 1.5),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Or race the clock: find as many sets as you can in one or three minutes. Ties go to whoever found their last set first.',
                 style: TextStyle(fontSize: 16, height: 1.5),
               ),
               const SizedBox(height: 24),
@@ -594,27 +645,35 @@ class _GameScreenState extends State<GameScreen> {
       ),
     ),
     const SizedBox(height: 22),
-    const Text(
-      'Five sets.\nOne good run.',
-      textAlign: TextAlign.center,
-      style: TextStyle(
-        fontSize: 46,
-        height: 1.08,
-        letterSpacing: -2,
-        fontWeight: FontWeight.w800,
+    // Scale down rather than wrap the longer headlines on narrow phones.
+    FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text(
+        mode.timed
+            ? '${mode.label}.\nEvery set counts.'
+            : 'Five sets.\nOne good run.',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: 46,
+          height: 1.08,
+          letterSpacing: -2,
+          fontWeight: FontWeight.w800,
+        ),
       ),
     ),
     const SizedBox(height: 24),
-    const Text(
-      'Find five sets in a row.\nSee how fast your eyes can go.',
+    Text(
+      mode.timed
+          ? 'Find as many sets as you can\nbefore the clock runs out.'
+          : 'Find five sets in a row.\nSee how fast your eyes can go.',
       textAlign: TextAlign.center,
       style: TextStyle(fontSize: 17, height: 1.5, color: Color(0xFF68717B)),
     ),
-    const SizedBox(height: 36),
+    const SizedBox(height: 28),
     ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 350),
       child: SizedBox(
-        height: 148,
+        height: 124,
         child: Row(
           children: [
             for (final id in [0, 40, 80])
@@ -631,7 +690,27 @@ class _GameScreenState extends State<GameScreen> {
         ),
       ),
     ),
-    const SizedBox(height: 36),
+    const SizedBox(height: 24),
+    SegmentedButton<RunMode>(
+      showSelectedIcon: false,
+      segments: [
+        for (final mode in RunMode.values)
+          ButtonSegment(value: mode, label: Text(mode.shortLabel)),
+      ],
+      selected: {mode},
+      onSelectionChanged: (selection) {
+        final chosen = selection.single;
+        setState(() {
+          mode = chosen;
+          // A pending seed belongs to one mode.
+          if (pendingSeed != null && RunMode.of(pendingSeed!) != chosen) {
+            pendingSeed = null;
+          }
+        });
+        player?.setMode(chosen).catchError((Object _) {});
+      },
+    ),
+    const SizedBox(height: 12),
     FilledButton.icon(
       onPressed: start,
       iconAlignment: IconAlignment.end,
@@ -651,7 +730,7 @@ class _GameScreenState extends State<GameScreen> {
         TextButton(onPressed: enterSeed, child: const Text('Run a seed')),
         TextButton(
           onPressed: () async {
-            final seed = pendingSeed ?? newSeed();
+            final seed = pendingSeed ?? newSeed(mode);
             setState(() => pendingSeed = seed);
             await copySeed(seed);
           },
@@ -724,9 +803,11 @@ class _GameScreenState extends State<GameScreen> {
               color: accent,
             ),
           ),
-          const Text(
-            'Five sets. You’ve got this.',
-            style: TextStyle(fontSize: 17),
+          Text(
+            game.mode.timed
+                ? '${game.mode.label}. Every set counts.'
+                : 'Five sets. You’ve got this.',
+            style: const TextStyle(fontSize: 17),
           ),
         ],
       ),
@@ -764,6 +845,13 @@ class _GameScreenState extends State<GameScreen> {
     },
   );
 
+  /// The time left in a timed run, or null for a sprint.
+  Duration? remaining(Duration elapsed) {
+    final limit = game.mode.limit;
+    if (limit == null) return null;
+    return elapsed >= limit ? Duration.zero : limit - elapsed;
+  }
+
   Widget runStatus() => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
@@ -777,7 +865,7 @@ class _GameScreenState extends State<GameScreen> {
               child: Row(
                 children: [
                   Text(
-                    '${game.streak} / 5',
+                    game.mode.timed ? '${game.streak}' : '${game.streak} / 5',
                     style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
@@ -796,7 +884,7 @@ class _GameScreenState extends State<GameScreen> {
               child: ValueListenableBuilder<Duration>(
                 valueListenable: elapsed,
                 builder: (context, value, child) => Text(
-                  formatTime(value),
+                  formatTime(remaining(value) ?? value),
                   key: const ValueKey('timer'),
                   style: const TextStyle(
                     fontSize: 24,
@@ -826,21 +914,37 @@ class _GameScreenState extends State<GameScreen> {
           'Legacy seed · new board after each set',
           style: TextStyle(fontSize: 11),
         ),
-      Row(
-        children: List.generate(
-          5,
-          (i) => Expanded(
-            child: Container(
-              margin: EdgeInsets.only(right: i == 4 ? 0 : 6),
-              height: 4,
-              decoration: BoxDecoration(
-                color: i < game.streak ? accent : const Color(0xFFDEDED5),
-                borderRadius: BorderRadius.circular(3),
+      if (game.mode.timed)
+        ValueListenableBuilder<Duration>(
+          valueListenable: elapsed,
+          builder: (context, value, child) => ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value:
+                  remaining(value)!.inMilliseconds /
+                  game.mode.limit!.inMilliseconds,
+              minHeight: 4,
+              color: accent,
+              backgroundColor: const Color(0xFFDEDED5),
+            ),
+          ),
+        )
+      else
+        Row(
+          children: List.generate(
+            5,
+            (i) => Expanded(
+              child: Container(
+                margin: EdgeInsets.only(right: i == 4 ? 0 : 6),
+                height: 4,
+                decoration: BoxDecoration(
+                  color: i < game.streak ? accent : const Color(0xFFDEDED5),
+                  borderRadius: BorderRadius.circular(3),
+                ),
               ),
             ),
           ),
         ),
-      ),
       SizedBox(
         height: 32,
         child: Center(
@@ -867,16 +971,16 @@ class _GameScreenState extends State<GameScreen> {
         color: Color(0xFFE3ECDD),
         shape: BoxShape.circle,
       ),
-      child: const Icon(
-        Icons.check_rounded,
+      child: Icon(
+        game.mode.timed ? Icons.timer_outlined : Icons.check_rounded,
         size: 38,
-        color: Color(0xFF377548),
+        color: const Color(0xFF377548),
       ),
     ),
     const SizedBox(height: 24),
-    const Text(
-      'Five in a row.',
-      style: TextStyle(
+    Text(
+      game.mode.timed ? 'Time’s up.' : 'Five in a row.',
+      style: const TextStyle(
         fontSize: 38,
         letterSpacing: -1.5,
         fontWeight: FontWeight.w800,
@@ -885,7 +989,7 @@ class _GameScreenState extends State<GameScreen> {
     const SizedBox(height: 12),
     FittedBox(
       child: Text(
-        formatTime(watch.elapsed),
+        game.mode.timed ? '${game.streak}' : formatTime(watch.elapsed),
         key: const ValueKey('result-time'),
         style: const TextStyle(
           fontSize: 78,
@@ -895,9 +999,11 @@ class _GameScreenState extends State<GameScreen> {
         ),
       ),
     ),
-    const Text(
-      'YOUR TIME',
-      style: TextStyle(
+    Text(
+      game.mode.timed
+          ? '${game.streak == 1 ? 'SET' : 'SETS'} IN ${game.mode.label.toUpperCase()}'
+          : 'YOUR TIME',
+      style: const TextStyle(
         fontSize: 11,
         letterSpacing: 2,
         fontWeight: FontWeight.w700,
@@ -909,7 +1015,11 @@ class _GameScreenState extends State<GameScreen> {
           ? 'Practice run'
           : newBest
           ? 'Your best run.'
-          : 'Personal best  ${formatTime(best!)}',
+          : !game.mode.timed
+          ? 'Personal best  ${formatTime(best!)}'
+          : timedBest == null
+          ? 'No personal best yet.'
+          : 'Personal best  ${setCount(timedBest!.sets)}',
       style: const TextStyle(
         color: accent,
         fontSize: 16,
@@ -918,7 +1028,14 @@ class _GameScreenState extends State<GameScreen> {
     ),
     const SizedBox(height: 8),
     Text(
-      game.mistakes == 0
+      game.mode.timed
+          ? [
+              if (game.streak > 0) 'Last set at ${formatTime(lastSet)}.',
+              game.mistakes == 0
+                  ? 'No mistakes.'
+                  : '${game.mistakes} ${game.mistakes == 1 ? 'mistake' : 'mistakes'}.',
+            ].join(' ')
+          : game.mistakes == 0
           ? 'Clean run. Every set counted.'
           : '${game.mistakes} ${game.mistakes == 1 ? 'mistake' : 'mistakes'}. You got there.',
       style: const TextStyle(color: Color(0xFF68717B)),
@@ -930,6 +1047,8 @@ class _GameScreenState extends State<GameScreen> {
       child: Text(
         !eligible
             ? 'Practice replay. Only your first attempt can enter the leaderboard.'
+            : !canSubmit
+            ? 'Find at least one set to enter the high scores.'
             : submitted
             ? 'Score submitted as ${player!.nickname}.'
             : submitting
@@ -938,7 +1057,7 @@ class _GameScreenState extends State<GameScreen> {
         textAlign: TextAlign.center,
       ),
     ),
-    if (eligible && !submitted && !submitting)
+    if (canSubmit && !submitted && !submitting)
       OutlinedButton(
         onPressed: submitScore,
         child: const Text('Submit high score'),
@@ -975,3 +1094,5 @@ class _GameScreenState extends State<GameScreen> {
     const SizedBox(height: 24),
   ]);
 }
+
+String setCount(int sets) => '$sets ${sets == 1 ? 'set' : 'sets'}';

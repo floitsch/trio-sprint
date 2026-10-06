@@ -17,6 +17,14 @@ For every feature — number, shape, color, fill — the three cards must be all
 same or all different. Wrong trios count as mistakes while the clock continues.
 Leaving the app does not pause the stopwatch.
 
+- **Timed runs:** choose **1 min** or **3 min** on the start screen to find as
+  many sets as you can before time runs out. Boards keep evolving the same way.
+  More sets rank higher; ties go to the earlier last set. Runs without a set
+  cannot be submitted. Timed seeds start with `1m-` or `3m-`, so each seed
+  belongs to exactly one mode, with its own high scores and personal best. They
+  deal by the `s2` rules from a different starting state, so the same digits
+  in another mode reveal nothing.
+
 - **Seeds:** every sprint uses a versioned seed, such as `s2-1234abcd`. Share a
   link or paste a seed/link into **Run a seed**. A seed fixes the starting board
   and deck for the entire five-set run. The sets
@@ -28,7 +36,8 @@ Leaving the app does not pause the stopwatch.
   their original five-board rules. Their scores are accessible by seed, separate
   from the current leaderboard and personal best. **Restart** starts a fresh
   seed; **Replay seed (practice)** repeats the same one.
-- **High scores:** fastest 100 runs, across current seeds or for one seed. Toggle
+- **High scores:** fastest 100 runs (or most sets for timed runs), across
+  current seeds of a mode or for one seed. Toggle
   **Only each player’s best** to hide additional runs from the same player ID.
   Tap a score to play its seed or copy its link. Set or change your nickname
   at the top of the high scores; a new name applies to future scores.
@@ -55,7 +64,7 @@ Leaving the app does not pause the stopwatch.
   started yet, the app asks before the countdown whether it is the player's
   first time, including on other devices. Finished first attempts upload
   automatically once a nickname is set; otherwise the results ask for one.
-  The server validates all five solutions and allows only one score per player
+  The server validates all solutions and allows only one score per player
   (including linked devices) and seed; retries of the same submission are safe. This is an honor system:
   clearing site data or switching devices creates a new identity, and submitted
   solo times are trusted. Identical nicknames do not merge different identities.

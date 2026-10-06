@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'game.dart';
 import 'practice.dart';
 
 import 'attempt_stub.dart'
@@ -61,6 +62,28 @@ class PlayerData {
     }
   }
 
+  /// The best first attempt of a timed mode.
+  TimedScore? timedBest(RunMode mode) {
+    final sets = preferences.getInt('best-${mode.prefix}-sets');
+    final milliseconds = preferences.getInt('best-${mode.prefix}-ms');
+    if (sets == null || milliseconds == null) return null;
+    return TimedScore(sets, milliseconds);
+  }
+
+  Future<void> saveTimedBest(RunMode mode, TimedScore score) async {
+    if (!score.beats(timedBest(mode))) return;
+    await preferences.setInt('best-${mode.prefix}-sets', score.sets);
+    await preferences.setInt('best-${mode.prefix}-ms', score.milliseconds);
+  }
+
+  RunMode get mode => RunMode.values.firstWhere(
+    (mode) => mode.prefix == preferences.getString('mode'),
+    orElse: () => RunMode.sprint,
+  );
+  Future<void> setMode(RunMode mode) async {
+    await preferences.setString('mode', mode.prefix);
+  }
+
   Future<bool> claimSeed(String seed) async {
     // Record at START, not at submission: abandoned runs count as attempts.
     return attempts.claimSeed(preferences, seed);
@@ -103,16 +126,29 @@ class PlayerData {
   }
 }
 
+/// Sets found in a timed run, and when the last of them was found.
+class TimedScore {
+  const TimedScore(this.sets, this.milliseconds);
+  final int sets;
+  final int milliseconds;
+  bool beats(TimedScore? other) =>
+      other == null ||
+      sets > other.sets ||
+      (sets == other.sets && milliseconds < other.milliseconds);
+}
+
 class Score {
   Score.fromJson(Map<String, dynamic> json)
     : name = json['name'] as String,
       seed = json['seed'] as String,
       milliseconds = json['milliseconds'] as int,
-      mistakes = json['mistakes'] as int;
+      mistakes = json['mistakes'] as int,
+      sets = json['sets'] as int? ?? 5;
   final String name;
   final String seed;
   final int milliseconds;
   final int mistakes;
+  final int sets;
 }
 
 class OnlineApi {
@@ -143,10 +179,14 @@ class OnlineApi {
     return json;
   }
 
-  Future<List<Score>> scores({required bool unique, String? seed}) async {
+  Future<List<Score>> scores({
+    required bool unique,
+    RunMode mode = RunMode.sprint,
+    String? seed,
+  }) async {
     final response = await request(
       '/scores',
-      query: {'unique': '$unique', 'seed': ?seed},
+      query: {'unique': '$unique', 'mode': mode.prefix, 'seed': ?seed},
     );
     return (response['scores'] as List)
         .map((e) => Score.fromJson(e as Map<String, dynamic>))

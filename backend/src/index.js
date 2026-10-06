@@ -53,21 +53,26 @@ export default {
         const seed = url.searchParams.get('seed');
         if (seed && !validSeed(seed)) return json({ error: 'Invalid seed' }, 400);
         const unique = url.searchParams.get('unique') !== 'false';
-        const statement = env.DB.prepare(scoreQuery(unique, !!seed));
+        // Older apps do not send a mode and get the five-set sprint.
+        const mode = url.searchParams.get('mode') ?? 's2';
+        if (!['s2', '1m', '3m'].includes(mode)) return json({ error: 'Invalid mode' }, 400);
+        const statement = env.DB.prepare(scoreQuery(unique, !!seed, mode));
         const { results } = await (seed ? statement.bind(seed) : statement).all();
         return json({ scores: results });
       }
       if (url.pathname === '/scores' && request.method === 'POST') {
         const body = await readJson(request);
         if (!validateScore(body)) return json({ error: 'Invalid score or solutions' }, 400);
+        const sets = body.solutions.length;
         const result = await env.DB.prepare(insertScoreQuery)
-          .bind(body.player, body.name.trim(), body.seed, body.milliseconds, body.mistakes,
+          .bind(body.player, body.name.trim(), body.seed, body.milliseconds, body.mistakes, sets,
             body.seed, body.player, body.player).run();
         if (!result.meta.changes) {
           const previous = await env.DB.prepare(existingScoreQuery)
             .bind(body.seed, body.player, body.player).first();
           // Retrying a timed-out submission is safe; a better replay cannot replace it.
-          if (!previous || previous.milliseconds !== body.milliseconds || previous.mistakes !== body.mistakes)
+          if (!previous || previous.milliseconds !== body.milliseconds || previous.mistakes !== body.mistakes ||
+              previous.sets !== sets)
             return json({ error: 'This player has already submitted this seed. Replays are practice.' }, 409);
         }
         return json({ ok: true });

@@ -44,6 +44,37 @@ List<SetCard>? findSet(List<SetCard> cards) {
 
 enum PickResult { selected, deselected, wrong, correct, finished }
 
+/// Sprints end after five sets. Timed runs count sets until the time is up.
+/// The mode is part of the seed, so a seed is only ever attempted in one mode.
+enum RunMode {
+  sprint('s2', null, 'Five sets', '5 sets'),
+  oneMinute('1m', Duration(minutes: 1), 'One minute', '1 min'),
+  threeMinutes('3m', Duration(minutes: 3), 'Three minutes', '3 min');
+
+  const RunMode(this.prefix, this.limit, this.label, this.shortLabel);
+  final String prefix;
+  final Duration? limit;
+  final String label;
+  final String shortLabel;
+  bool get timed => limit != null;
+
+  static RunMode of(String seed) => values.firstWhere(
+    (mode) => seed.startsWith('${mode.prefix}-'),
+    orElse: () => sprint,
+  );
+}
+
+/// Timed seeds deal like s2 seeds, but from a different starting state, so the
+/// same digits in another mode reveal nothing about the boards.
+int seedState(String seed) {
+  final digits = int.parse(seed.substring(3), radix: 16);
+  return switch (RunMode.of(seed)) {
+    RunMode.sprint => digits,
+    RunMode.oneMinute => digits ^ 0x9e3779b9,
+    RunMode.threeMinutes => digits ^ 0x7f4a7c15,
+  };
+}
+
 class SetGame {
   SetGame({Random? random, this.seed}) : _random = random ?? Random() {
     restart();
@@ -58,7 +89,8 @@ class SetGame {
   final Set<int> selected = {};
   int streak = 0;
   int mistakes = 0;
-  bool get finished => streak == 5;
+  RunMode get mode => seed == null ? RunMode.sprint : RunMode.of(seed!);
+  bool get finished => !mode.timed && streak == 5;
 
   void restart() {
     streak = 0;
@@ -76,7 +108,7 @@ class SetGame {
       return;
     }
     if (seed != null) {
-      _seedRandom = SeedRandom(int.parse(seed!.substring(3), radix: 16));
+      _seedRandom = SeedRandom(seedState(seed!));
     }
     _deck
       ..clear()
@@ -212,11 +244,11 @@ String? normalizeSeed(String value) {
   final trimmed = value.trim();
   final uri = Uri.tryParse(trimmed);
   final seed = (uri?.queryParameters['seed'] ?? trimmed).toLowerCase();
-  return RegExp(r'^s[12]-[0-9a-f]{8}$').hasMatch(seed) ? seed : null;
+  return RegExp(r'^(s[12]|[13]m)-[0-9a-f]{8}$').hasMatch(seed) ? seed : null;
 }
 
-String newSeed() =>
-    's2-${Random.secure().nextInt(0x100000000).toRadixString(16).padLeft(8, '0')}';
+String newSeed([RunMode mode = RunMode.sprint]) =>
+    '${mode.prefix}-${Random.secure().nextInt(0x100000000).toRadixString(16).padLeft(8, '0')}';
 
 List<List<SetCard>> seededBoards(String seed) {
   if (normalizeSeed(seed) != seed || !seed.startsWith('s1-')) {

@@ -11,7 +11,16 @@ export function findSet(board) {
         if (isSet([board[a], board[b], board[c]])) return [board[a], board[b], board[c]];
   return null;
 }
-export function validSeed(seed) { return typeof seed === 'string' && /^s[12]-[0-9a-f]{8}$/.test(seed); }
+export function validSeed(seed) { return typeof seed === 'string' && /^(s[12]|[13]m)-[0-9a-f]{8}$/.test(seed); }
+// Timed seeds count sets until their limit. Keep in sync with RunMode in lib/game.dart.
+const limits = {'1m': 60000, '3m': 180000};
+export function timeLimit(seed) { return limits[seed.slice(0, 2)] ?? null; }
+// Timed seeds deal like s2 from a different starting state; see seedState in lib/game.dart.
+function seedState(seed) {
+  const digits = parseInt(seed.slice(3), 16);
+  const salt = {'1m': 0x9e3779b9, '3m': 0x7f4a7c15}[seed.slice(0, 2)] ?? 0;
+  return (digits ^ salt) >>> 0;
+}
 export function seededBoards(seed) {
   if (!validSeed(seed) || !seed.startsWith('s1-')) throw new Error('Only legacy s1 seeds have independent boards');
   let state = parseInt(seed.slice(3), 16);
@@ -33,11 +42,15 @@ export function seededBoards(seed) {
 }
 export function validPlayer(value) { return typeof value === 'string' && /^[a-f0-9]{48}$/.test(value); }
 export function validName(value) { return typeof value === 'string' && value.trim().length > 0 && value.length <= 24 && !/[\x00-\x1f]/.test(value); }
+// For timed seeds, milliseconds is the time of the last found set.
 export function validateScore(body) {
   if (!body || !validPlayer(body.player) || !validName(body.name) || !validSeed(body.seed) ||
-      !Number.isInteger(body.milliseconds) || body.milliseconds < 1 || body.milliseconds > 86400000 ||
+      !Number.isInteger(body.milliseconds) || body.milliseconds < 1 ||
+      body.milliseconds > (timeLimit(body.seed) ?? 86400000) ||
       !Number.isInteger(body.mistakes) || body.mistakes < 0 || body.mistakes > 100000 ||
-      !Array.isArray(body.solutions) || body.solutions.length !== 5) return false;
+      !Array.isArray(body.solutions)) return false;
+  const sets = body.solutions.length;
+  if (timeLimit(body.seed) ? sets < 1 || sets > 500 : sets !== 5) return false;
   const run = new SeededRun(body.seed);
   return body.solutions.every(solution => run.pick(solution));
 }
@@ -50,7 +63,8 @@ export class SeededRun {
   constructor(seed) {
     if (!validSeed(seed)) throw new Error('Invalid seed');
     this.progress = 0;
-    this.state = parseInt(seed.slice(3), 16);
+    this.target = timeLimit(seed) ? Infinity : 5;
+    this.state = seedState(seed);
     if (seed.startsWith('s1-')) {
       this.rounds = seededBoards(seed);
       this.board = [...this.rounds[0]];
@@ -87,9 +101,9 @@ export class SeededRun {
     }
   }
   pick(cards) {
-    if (this.progress === 5 || !isSet(cards) || !cards.every(c => this.board.includes(c))) return false;
+    if (this.progress === this.target || !isSet(cards) || !cards.every(c => this.board.includes(c))) return false;
     this.progress++;
-    if (this.progress === 5) return true;
+    if (this.progress === this.target) return true;
     if (this.rounds) {
       this.board = [...this.rounds[this.progress]];
       return true;

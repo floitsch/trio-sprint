@@ -45,6 +45,34 @@ test('scores: more than five, per-player filter, seed filter, immutable/idempote
   assert.ok(current.scores.every(row => row.seed.startsWith('s2-')));
 });
 
+test('timed scores rank by sets, then by the last set, separately per mode', async () => {
+  const timed = (id, seed, sets, milliseconds) => {
+    const run = new SeededRun(seed);
+    const solutions = [];
+    for (let i = 0; i < sets; i++) {
+      const solution = findSet(run.board);
+      solutions.push(solution);
+      run.pick(solution);
+    }
+    return {player: id, name: 'Timed friend', seed, milliseconds, mistakes: 0, solutions};
+  };
+  const seed = () => '1m-' + randomBytes(4).toString('hex');
+  const [a, b, c] = [player(), player(), player()];
+  // Far more sets than a person finds, so these rows top the local board.
+  assert.equal((await post('/scores', timed(a, seed(), 300, 59000))).status, 200);
+  assert.equal((await post('/scores', timed(b, seed(), 301, 59999))).status, 200);
+  assert.equal((await post('/scores', timed(c, seed(), 300, 30000))).status, 200);
+  assert.equal((await post('/scores', timed(c, seed(), 0, 30000))).status, 400);
+  assert.equal((await post('/scores', timed(c, seed(), 3, 60001))).status, 400);
+  const top = (await (await fetch(base + '/scores?mode=1m&unique=false')).json()).scores;
+  assert.deepEqual(top.slice(0, 3).map(row => [row.sets, row.milliseconds]),
+    [[301, 59999], [300, 30000], [300, 59000]]);
+  assert.ok(top.every(row => row.seed.startsWith('1m-')));
+  const sprint = (await (await fetch(base + '/scores?unique=false')).json()).scores;
+  assert.ok(sprint.every(row => row.seed.startsWith('s2-') && row.sets === 5));
+  assert.equal((await fetch(base + '/scores?mode=2m')).status, 400);
+});
+
 class Client {
   constructor(room, id, name) {
     this.messages = [];

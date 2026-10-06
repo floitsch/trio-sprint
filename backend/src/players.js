@@ -65,22 +65,24 @@ export async function linkDevices(db, body) {
 export const scoreIdentities = `SELECT scores.*, COALESCE(player_links.identity, scores.player) AS identity
   FROM scores LEFT JOIN player_links ON player_links.player = scores.player`;
 
-export function scoreQuery(unique, filteredSeed) {
+// More sets rank higher. Sprints always have five, so they rank by time.
+export function scoreQuery(unique, filteredSeed, mode = 's2') {
+  if (!['s2', '1m', '3m'].includes(mode)) throw new Error('Invalid mode');
   return `WITH runs AS (
-      ${scoreIdentities} ${filteredSeed ? 'WHERE seed = ?' : "WHERE seed LIKE 's2-%'"}
+      ${scoreIdentities} ${filteredSeed ? 'WHERE seed = ?' : `WHERE seed LIKE '${mode}-%'`}
     ), attempts AS (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY identity, seed ORDER BY id) AS attempt_rank FROM runs
     ), ranked AS (
-      SELECT *, ROW_NUMBER() OVER (PARTITION BY identity ORDER BY milliseconds, id) AS player_rank
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY identity ORDER BY sets DESC, milliseconds, id) AS player_rank
       FROM attempts WHERE attempt_rank = 1
-    ) SELECT name, seed, milliseconds, mistakes FROM ranked
-      ${unique ? 'WHERE player_rank = 1' : ''} ORDER BY milliseconds, id LIMIT 100`;
+    ) SELECT name, seed, milliseconds, mistakes, sets FROM ranked
+      ${unique ? 'WHERE player_rank = 1' : ''} ORDER BY sets DESC, milliseconds, id LIMIT 100`;
 }
 
-export const existingScoreQuery = `SELECT milliseconds, mistakes FROM (${scoreIdentities})
+export const existingScoreQuery = `SELECT milliseconds, mistakes, sets FROM (${scoreIdentities})
   WHERE seed = ? AND identity = COALESCE((SELECT identity FROM player_links WHERE player = ?), ?)
   ORDER BY id LIMIT 1`;
 
-export const insertScoreQuery = `INSERT INTO scores (player, name, seed, milliseconds, mistakes)
-  SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (${existingScoreQuery})
+export const insertScoreQuery = `INSERT INTO scores (player, name, seed, milliseconds, mistakes, sets)
+  SELECT ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (${existingScoreQuery})
   ON CONFLICT(player, seed) DO NOTHING`;

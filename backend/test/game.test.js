@@ -69,3 +69,31 @@ test('1000 s2 runs keep unchosen cards in place and remain solvable', async () =
     assert.equal(run.progress, 5);
   }
 });
+
+test('timed runs match shared fixtures and continue past five sets', async () => {
+  const {SeededRun} = await import('../src/game.js');
+  const fixtures = JSON.parse(readFileSync(new URL('../../test/timed_run_fixtures.json', import.meta.url)));
+  for (const fixture of fixtures) {
+    const run = new SeededRun(fixture.seed);
+    for (let i = 0; i < fixture.boards.length; i++) {
+      assert.deepEqual(run.board, fixture.boards[i]);
+      assert.ok(run.pick(fixture.solutions[i]));
+    }
+    assert.equal(run.progress, fixture.boards.length);
+  }
+});
+
+test('timed scores need at least one set within the time limit', () => {
+  const [fixture] = JSON.parse(readFileSync(new URL('../../test/timed_run_fixtures.json', import.meta.url)));
+  assert.ok(fixture.seed.startsWith('1m-'));
+  const score = {player: 'a'.repeat(48), name: 'Flo', seed: fixture.seed, milliseconds: 59000,
+    mistakes: 1, solutions: fixture.solutions.slice(0, 12)};
+  assert.ok(validateScore(score));
+  assert.ok(validateScore({...score, solutions: fixture.solutions.slice(0, 1)}));
+  assert.equal(validateScore({...score, solutions: []}), false);
+  assert.equal(validateScore({...score, milliseconds: 60001}), false);
+  assert.equal(validateScore({...score, milliseconds: 0}), false);
+  // Solutions for one mode do not fit the same digits in another mode.
+  assert.equal(validateScore({...score, seed: fixture.seed.replace('1m-', 's2-'),
+    solutions: fixture.solutions.slice(0, 5)}), false);
+});
