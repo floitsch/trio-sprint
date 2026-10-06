@@ -12,6 +12,7 @@ import 'leaderboard.dart';
 import 'training.dart';
 import 'race.dart';
 import 'install.dart';
+import 'update.dart';
 import 'practice.dart';
 
 void main() => runApp(const TrioSprintApp());
@@ -72,6 +73,7 @@ class _GameScreenState extends State<GameScreen> {
   final boardClock = BoardClock();
   int boardMistakes = 0;
   RunMode mode = RunMode.sprint;
+  bool updateReady = false;
   // When the last set of a timed run was found.
   Duration lastSet = Duration.zero;
 
@@ -97,6 +99,9 @@ class _GameScreenState extends State<GameScreen> {
     pendingSeed = normalizeSeed(Uri.base.queryParameters['seed'] ?? '');
     if (pendingSeed != null) mode = RunMode.of(pendingSeed!);
     loading = loadPlayer();
+    onUpdateReady(() {
+      if (mounted) setState(() => updateReady = true);
+    });
   }
 
   Future<void> loadPlayer() async {
@@ -635,6 +640,19 @@ class _GameScreenState extends State<GameScreen> {
   );
 
   Widget landing() => centeredPage([
+    // Only offered here, so a reload never interrupts a run or loses a result.
+    if (updateReady)
+      Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            const Text('A new version is ready.'),
+            TextButton(onPressed: reloadApp, child: const Text('Reload')),
+          ],
+        ),
+      ),
     const Text(
       'A LITTLE PATTERN. A LITTLE PACE.',
       style: TextStyle(

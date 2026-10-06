@@ -22,8 +22,14 @@ const ASSETS = __ASSETS__;
 const ROOT = new URL('./', self.location.href);
 // Cache the canonical homepage: Cloudflare redirects /index.html to /.
 const urls = ASSETS.map(path => new URL(path === 'index.html' ? './' : path, ROOT).href);
+// Take over as soon as this version is cached, even with app windows open.
+// That never reloads a page: open pages keep the code they already loaded,
+// so runs are not interrupted, and they switch to this version on their next
+// load. Waiting for every window to close kept installed apps outdated.
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(urls)));
+  // Bypass the HTTP cache, which could still hold the previous version.
+  const requests = urls.map(url => new Request(url, {cache: 'reload'}));
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(requests)).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {

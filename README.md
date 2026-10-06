@@ -99,8 +99,11 @@ trademark of its owner.
 - **Android web app:** use **Install app** in the game, or Chrome’s menu →
   *Install app / Add to Home screen*. No app store account is needed.
 
-The offline cache is downloaded on the first visit. Updates wait until existing
-app windows close, so a new deployment cannot interrupt an active run.
+The offline cache is downloaded on the first visit. A new deployment downloads
+in the background and takes over without reloading open windows, so it cannot
+interrupt an active run. Windows show it on their next load; the start screen
+offers **Reload** once it is ready. Installed apps check for updates when they
+return to the foreground.
 
 ## Run
 

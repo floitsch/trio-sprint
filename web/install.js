@@ -13,12 +13,37 @@ window.trioInstall = async () => {
   await prompt.userChoice;
   return true;
 };
+// A new version takes over in the background (see tool/build_web.py) but never
+// reloads the page by itself. The app offers a reload on its start screen.
+let updateReady = false;
+let updateListener;
 if ('serviceWorker' in navigator) {
+  // The first install also takes control of the page; that is not an update.
+  let controlled = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (controlled) {
+      updateReady = true;
+      updateListener?.();
+    }
+    controlled = true;
+  });
   window.addEventListener('load', () => {
-    // Updated workers wait until existing app windows close; never reload a run.
-    navigator.serviceWorker.register('sw.js').catch(console.warn);
+    navigator.serviceWorker.register('sw.js').then(registration => {
+      // Installed apps can stay open for days; check again when they return.
+      let lastCheck = Date.now();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible' || Date.now() - lastCheck < 600000) return;
+        lastCheck = Date.now();
+        registration.update().catch(() => {});
+      });
+    }).catch(console.warn);
   });
 }
+window.trioOnUpdate = listener => {
+  updateListener = listener;
+  if (updateReady) listener();
+};
+window.trioReload = () => location.reload();
 
 // Web Locks serializes claims across tabs. If storage/locking is unavailable,
 // fail closed: solo play still works, but the run is not leaderboard eligible.
