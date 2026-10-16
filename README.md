@@ -6,8 +6,8 @@
 A Flutter pattern game: find **five sets** with a two-second countdown before
 cards appear and the stopwatch starts. Start with 12 cards; each found set is
 replaced by three cards while the other nine stay in place. Abandon returns to
-the start screen during either the countdown or play, without restoring seed
-eligibility.
+the start screen without restoring seed eligibility. During play, choose
+Interrupted or Too slow to distinguish interruptions from difficult boards.
 
 The board fits all 12 portrait cards to the available width and height, including
 short phone viewports. Compact run controls leave more room for cards; landscape
@@ -19,6 +19,11 @@ Leaving the app does not pause the stopwatch.
 
 - **Timed runs:** choose **1 min** or **3 min** on the start screen to find as
   many sets as you can before time runs out. Boards keep evolving the same way.
+  Results appear immediately; buttons appear after one second to prevent
+  accidental taps while finishing a set.
+  After timeout, **Review last unsolved board** opens the exact last layout,
+  with the solution hidden until you choose to reveal it. You can try solving
+  it without changing scores or statistics.
   More sets rank higher; ties go to the earlier last set. Runs without a set
   cannot be submitted. Timed seeds start with `1m-` or `3m-`, so each seed
   belongs to exactly one mode, with its own high scores and personal best. They
@@ -53,7 +58,8 @@ Leaving the app does not pause the stopwatch.
   then count as one player, including for **Only each player’s best**. You can
   link more devices using any already-linked device's code. Original score rows
   are preserved; if both devices submitted a seed, the earliest submission counts.
-  Personal bests, nicknames, seed-attempt history and training history stay local.
+  Personal bests, nicknames, seed-attempt history and the displayed statistics
+  remain device-specific; linking does not import another device’s board history.
   This uses the same honor system as scores and does not require a login.
 - **First attempts only:** starting a seed consumes its eligibility, including
   abandoned runs and countdown restarts. Replays are practice. Browser Web Locks
@@ -62,8 +68,9 @@ Leaving the app does not pause the stopwatch.
   Runs of freshly generated seeds are first attempts by construction. For any
   other seed (typed, linked or from the high scores) that this device has not
   started yet, the app asks before the countdown whether it is the player's
-  first time, including on other devices. Finished first attempts upload
-  automatically once a nickname is set; otherwise the results ask for one.
+  first time, including on other devices. Finished first attempts are saved
+  to a durable queue and upload automatically once a nickname is set and the
+  app is online; otherwise you can add a nickname later in Offline & sync.
   The server validates all solutions and allows only one score per player
   (including linked devices) and seed; retries of the same submission are safe. This is an honor system:
   clearing site data or switching devices creates a new identity, and submitted
@@ -73,18 +80,58 @@ Leaving the app does not pause the stopwatch.
   quit. Portrait cards fit the available screen; hints and skipping are available.
   **Cards I was slow on** revisits the 20 hardest of your last 100 saved boards
   from sprints, races and training. Ranking uses active viewing time, plus five
-  seconds per mistake and 15 seconds for a hint or skip. Repeated boards keep
+  seconds per mistake and 15 seconds for a hint, skip or difficulty-related restart. Repeated boards keep
   the latest attempt. History stays on this device and works offline; time in
   the background does not affect this practice ranking or pause a sprint score.
+- **Statistics:** every new board attempt is saved locally with its layout,
+  actual solution when solved, active viewing time, mistakes, assistance, mode,
+  timestamp and outcome. Statistics shows solved counts, median unassisted
+  solving time, the fastest unassisted set with its layout, and recent attempts.
+  Filter modes to separate sprint, timed runs, replays and training. Existing
+  training history is preserved but cannot be retroactively counted as solves.
+  Interrupted attempts never affect difficult-board ranking; **Restart** and
+  **Abandon → Too slow** retain the unfinished board for training. Timed-out
+  boards retain the time actually spent on them, even for a short final board.
+  Unfinished attempts never count as solved or enter solving-time medians.
+  Training Quit and race forfeits/disconnects are treated as interruptions.
+  Statistics remain available locally and board history also uploads when online.
+  Linking devices does not combine their displayed statistics.
 - **1 vs 1:** share a room link/code, ready up, and race to find five sets
   from the same starting board and seeded deck. Each player keeps their own
   evolving board; reconnecting on the same device restores their exact choices.
-  A Cloudflare room validates claims and chooses the winner. Leaving forfeits a
+  Before readying, each player can set their own **card delay** in 0.1-second
+  steps (0–30 seconds). It applies to the opening deal and each new replacement;
+  unchanged cards stay visible, and selections resume when the full board is
+  revealed. The server withholds new card identities and rejects early claims,
+  including across reconnects. Changing a delay resets both players' readiness.
+  With at least five unassisted full-board solves each, a suggested delay is the
+  positive difference between the players' recent median solving times (up to
+  100 solves each; excludes replays and training reviews). It is a starting
+  estimate and can be adjusted. A Cloudflare room validates claims and chooses
+  the winner. Leaving forfeits a
   started race. Rooms expire
   after one hour. Race boards count as seen seeds and do not award solo scores.
 
-Solo play and training work offline once the app assets have downloaded. High
-scores and multiplayer require the Cloudflare backend described below.
+Solo play, timed runs, training, board review and statistics work offline once
+all app assets have downloaded. Before a flight, open **Offline & sync** and
+check **Ready for offline play** (Android installs already contain the assets).
+You can close and reopen the installed app while offline.
+
+Each eligible completed score is saved **before** a network request, including
+scores without a nickname. Full board attempts (solved, interrupted, timed out,
+restarted and skipped) remain local and upload separately from public scores.
+The persistent queue survives app restarts. It retries on startup/resume, on a
+browser online event, and every 30 seconds while the app is open. If the app was
+closed when connectivity returned, open it to sync. Lost responses are safe to
+retry without duplicate scores or board records. You can keep playing during
+uploads. Offline & sync shows pending counts, a possible offline indication and any rejected
+scores; a rejected score stays saved locally and does not block later runs.
+Unconfigured development builds retain all records locally until a server is
+configured. Board uploads do not require a nickname; public scores do.
+
+Live leaderboards and multiplayer require the Cloudflare backend described below.
+New server deployments must apply migration `0005_attempts.sql` for board history
+uploads (the deployment workflow applies migrations automatically).
 
 Trio Sprint is an unofficial fan project. It is not affiliated with, endorsed
 by, or sponsored by PlayMonster or Set Enterprises. SET® is a registered

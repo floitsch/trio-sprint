@@ -115,7 +115,7 @@ test('two-player race: countdown, identical boards, validation, reconnect and wi
     first.send({type: 'pick', round: 0, cards: [0, 0, 0]});
     await first.wait(s => s.players[s.you].mistakes === 1);
     assert.equal(first.state.players[first.state.you].progress, 0);
-    assert.match(first.state.seed, /^s2-/);
+    assert.equal(first.state.seed, null); // Seed would reveal withheld cards.
     const starting = [...first.state.board];
     const solution = findSet(starting);
     first.send({type: 'pick', round: 0, cards: solution});
@@ -139,6 +139,7 @@ test('two-player race: countdown, identical boards, validation, reconnect and wi
     }
     await second.wait(s => s.ended);
     assert.equal(reconnect.state.winner, reconnect.state.you);
+    assert.match(reconnect.state.seed, /^s2-/);
     assert.equal(second.state.winner, reconnect.state.winner);
   } finally { first.close(); second.close(); reconnect?.close(); }
 });
@@ -157,4 +158,68 @@ test('leaving a started race forfeits it', async () => {
     await second.wait(s => s.ended);
     assert.equal(second.state.winner, second.state.you);
   } finally { first.close(); second.close(); }
+});
+
+test('handicap withholds opening and replacement cards, rejects early picks and survives reconnect', async () => {
+  const {room} = await (await post('/rooms', {})).json();
+  const id = player();
+  const first = new Client(room, id, 'Fast');
+  const second = new Client(room, player(), 'Friend');
+  let reconnect;
+  try {
+    await first.wait(s => s.players.length === 2);
+    await second.wait(s => s.players.length === 2);
+    first.send({type: 'benchmark', medianMs: 2000, sampleCount: 10});
+    second.send({type: 'benchmark', medianMs: 3200, sampleCount: 10});
+    await second.wait(s => s.players.every(p => p.medianMs > 0));
+    first.send({type: 'ready'});
+    await first.wait(s => s.players[s.you].ready);
+    first.send({type: 'handicap', milliseconds: 1200});
+    await first.wait(s => s.players[s.you].handicapMs === 1200 && s.players.every(p => !p.ready));
+    first.send({type: 'ready'});
+    second.send({type: 'ready'});
+    await second.wait(s => s.board.length === 12);
+    await first.wait(s => s.board.length === 12 && s.board.every(c => c === null));
+    assert.equal(first.state.seed, null);
+    const starting = [...second.state.board];
+    first.send({type: 'pick', round: 0, cards: findSet(starting)});
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(first.state.players[first.state.you].progress, 0);
+    await first.wait(s => s.board.length === 12 && s.board.every(c => c !== null));
+    first.send({type: 'handicap', milliseconds: 0});
+    first.send({type: 'pick', round: 0, cards: findSet(starting)});
+    await first.wait(s => s.players[s.you].progress === 1);
+    const masked = [...first.state.board];
+    assert.equal(masked.filter(c => c === null).length, 3);
+    assert.equal(first.state.players[first.state.you].handicapMs, 1200);
+    const revealAt = first.state.revealAt;
+    first.close();
+    reconnect = new Client(room, id, 'Fast');
+    await reconnect.wait(s => s.players[s.you].progress === 1);
+    assert.equal(reconnect.state.revealAt, revealAt);
+    assert.deepEqual(reconnect.state.board, masked);
+    await reconnect.wait(s => s.board.every(c => c !== null));
+    for (let i = 0; i < masked.length; i++) {
+      if (masked[i] !== null) assert.equal(reconnect.state.board[i], masked[i]);
+    }
+    reconnect.send({type: 'leave'});
+    await second.wait(s => s.ended);
+  } finally { first.close(); second.close(); reconnect?.close(); }
+});
+
+test('offline board history accepts idempotent batches independently of scores and nickname', async () => {
+  const run = new SeededRun('s2-1234abcd');
+  const body = {player: player(), attempts: [{id: '0', board: {
+    cards: run.board, anchors: [], differences: null, milliseconds: 120000,
+    mistakes: 0, assisted: false, outcome: 'interrupted', source: 's2',
+    seed: 's2-1234abcd', recordedAt: Date.now(), solutionCards: [],
+  }}]};
+  assert.equal((await post('/attempts', body)).status, 200);
+  assert.equal((await post('/attempts', body)).status, 200);
+  body.attempts[0].id = '1';
+  body.attempts[0].board.outcome = 'solved';
+  body.attempts[0].board.solutionCards = findSet(run.board);
+  assert.equal((await post('/attempts', body)).status, 200);
+  body.attempts[0].board.cards = [99];
+  assert.equal((await post('/attempts', body)).status, 400);
 });

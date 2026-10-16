@@ -26,6 +26,7 @@ String? normalizeDeviceCode(String value) {
 }
 
 class PlayerData {
+  void Function()? onRecordsChanged;
   PlayerData(this.preferences);
   final SharedPreferences preferences;
   static Future<PlayerData> load() async {
@@ -45,7 +46,12 @@ class PlayerData {
       preferences.getInt(seed.startsWith('s1-') ? 'best' : 'best-s2');
   bool get unique => preferences.getBool('unique') ?? true;
   Future<void> setNickname(String name) async {
-    await preferences.setString('nickname', name.trim());
+    await _serialize(() async {
+      if (!await preferences.setString('nickname', name.trim())) {
+        throw StateError('Could not save nickname.');
+      }
+    });
+    onRecordsChanged?.call();
   }
 
   Future<void> setUnique(bool value) async {
@@ -85,13 +91,16 @@ class PlayerData {
   }
 
   Future<bool> claimSeed(String seed) async {
+    // Seed checks reload preferences on native platforms. Finish history writes
+    // first so that reload cannot replace their in-memory cache with old data.
     // Record at START, not at submission: abandoned runs count as attempts.
-    return attempts.claimSeed(preferences, seed);
+    return _serialize(() => attempts.claimSeed(preferences, seed));
   }
 
   /// Whether this device has started [seed] before, without claiming it.
-  Future<bool> hasAttempted(String seed) =>
-      attempts.hasAttempted(preferences, seed);
+  Future<bool> hasAttempted(String seed) async {
+    return _serialize(() => attempts.hasAttempted(preferences, seed));
+  }
 
   List<PracticeBoard> get practiceHistory {
     final boards = <PracticeBoard>[];
@@ -114,16 +123,137 @@ class PlayerData {
     return boards.take(20).toList();
   }
 
+  List<PracticeBoard> get attemptsHistory {
+    final records = <PracticeBoard>[];
+    for (final raw
+        in preferences.getStringList('set-attempts-v1') ?? <String>[]) {
+      try {
+        records.add(
+          PracticeBoard.fromJson(jsonDecode(raw) as Map<String, dynamic>),
+        );
+      } catch (_) {
+        /* Ignore damaged records independently. */
+      }
+    }
+    return records;
+  }
+
+  double? get benchmarkMedian => medianMilliseconds(
+    attemptsHistory
+        .where((a) => a.benchmark && a.source != 'review')
+        .toList()
+        .reversed
+        .take(100)
+        .map((a) => a.milliseconds),
+  );
+  int get benchmarkCount =>
+      attemptsHistory.where((a) => a.benchmark && a.source != 'review').length;
+
+  // Serialize read/modify/write operations, including fast consecutive solves.
+  Future<void> _historyWrites = Future.value();
+  Future<T> _serialize<T>(Future<T> Function() action) {
+    final write = _historyWrites.then((_) => action());
+    _historyWrites = write.then<void>((_) {}, onError: (Object _) {});
+    return write;
+  }
+
   Future<void> recordPractice(PracticeBoard board) async {
-    final boards = practiceHistory..removeWhere((old) => old.key == board.key);
-    boards.insert(0, board);
-    if (!await preferences.setStringList(
-      'practice-history-v1',
-      boards.take(100).map((entry) => jsonEncode(entry.toJson())).toList(),
+    await _serialize(() async {
+      if (board.source != 'legacy') {
+        final records =
+            preferences.getStringList('set-attempts-v1') ?? <String>[];
+        if (!await preferences.setStringList('set-attempts-v1', [
+          ...records,
+          jsonEncode(board.toJson()),
+        ])) {
+          throw StateError('Could not save set statistics.');
+        }
+      }
+      if (!board.countsForTraining) return;
+      final boards = practiceHistory
+        ..removeWhere((old) => old.key == board.key);
+      boards.insert(0, board);
+      if (!await preferences.setStringList(
+        'practice-history-v1',
+        boards.take(100).map((entry) => jsonEncode(entry.toJson())).toList(),
+      )) {
+        throw StateError('Could not save practice history.');
+      }
+    });
+    onRecordsChanged?.call();
+  }
+
+  /// Append-only history positions are stable IDs for idempotent cloud uploads.
+  int get historyLength =>
+      (preferences.getStringList('set-attempts-v1') ?? []).length;
+  int get syncedHistory => preferences.getInt('synced-attempts-v1') ?? 0;
+  int get pendingAttempts => historyLength - syncedHistory;
+  List<Map<String, dynamic>> attemptBatch() {
+    final records = preferences.getStringList('set-attempts-v1') ?? <String>[];
+    return [
+      for (
+        var i = syncedHistory;
+        i < records.length && i < syncedHistory + 10;
+        i++
+      )
+        {'id': '$i', 'board': jsonDecode(records[i])},
+    ];
+  }
+
+  Future<void> acknowledgeAttempts(int count) => _serialize(() async {
+    if (!await preferences.setInt('synced-attempts-v1', count)) {
+      throw StateError('Could not save synchronization progress.');
+    }
+  });
+
+  List<Map<String, dynamic>> get savedScores => [
+    for (final key in preferences.getKeys().where(
+      (k) => k.startsWith('saved-score:'),
+    ))
+      jsonDecode(preferences.getString(key)!) as Map<String, dynamic>,
+  ];
+  int get pendingScores =>
+      savedScores.where((s) => s['status'] == 'pending').length;
+  int get rejectedScores =>
+      savedScores.where((s) => s['status'] == 'rejected').length;
+  Map<String, dynamic>? savedScore(String seed) {
+    final raw = preferences.getString('saved-score:$seed');
+    return raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
+  }
+
+  Future<void> queueScore({
+    required String seed,
+    required int milliseconds,
+    required int mistakes,
+    required List<List<int>> solutions,
+  }) async {
+    await _serialize(() async {
+      // Never replace a first attempt, even while it is waiting for a nickname.
+      if (savedScore(seed) != null) return;
+      await _saveScore({
+        'seed': seed,
+        'player': player,
+        'name': nickname,
+        'milliseconds': milliseconds,
+        'mistakes': mistakes,
+        'solutions': solutions,
+        'status': 'pending',
+      });
+    });
+    onRecordsChanged?.call();
+  }
+
+  Future<void> _saveScore(Map<String, dynamic> score) async {
+    if (!await preferences.setString(
+      'saved-score:${score['seed']}',
+      jsonEncode(score),
     )) {
-      throw StateError('Could not save practice history.');
+      throw StateError('Could not save this score on your device.');
     }
   }
+
+  Future<void> updateSavedScore(Map<String, dynamic> score) =>
+      _serialize(() => _saveScore(score));
 }
 
 /// Sets found in a timed run, and when the last of them was found.
@@ -151,6 +281,14 @@ class Score {
   final int sets;
 }
 
+class ApiException implements Exception {
+  const ApiException(this.status, this.message);
+  final int status;
+  final String message;
+  @override
+  String toString() => message;
+}
+
 class OnlineApi {
   static const baseUrl = String.fromEnvironment('API_URL');
   bool get configured => baseUrl.isNotEmpty;
@@ -174,7 +312,10 @@ class OnlineApi {
             .timeout(const Duration(seconds: 12));
     final json = jsonDecode(response.body) as Map<String, dynamic>;
     if (response.statusCode >= 400) {
-      throw Exception(json['error'] ?? 'Request failed');
+      throw ApiException(
+        response.statusCode,
+        json['error'] as String? ?? 'Request failed',
+      );
     }
     return json;
   }
@@ -220,4 +361,14 @@ String shareLink(String key, String value) {
   return (web ? base : Uri.parse('https://trio-sprint.floitsch.workers.dev/'))
       .replace(queryParameters: {key: value}, fragment: '')
       .toString();
+}
+
+/// Median includes every solved attempt, including repeated layouts.
+double? medianMilliseconds(Iterable<int> values) {
+  final sorted = values.toList()..sort();
+  if (sorted.isEmpty) return null;
+  final middle = sorted.length ~/ 2;
+  return sorted.length.isOdd
+      ? sorted[middle].toDouble()
+      : (sorted[middle - 1] + sorted[middle]) / 2;
 }

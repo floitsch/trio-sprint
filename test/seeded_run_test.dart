@@ -123,7 +123,9 @@ void main() {
       // nothing uploads automatically, so the button remains.
       expect(find.text('First time on this seed?'), findsNothing);
       expect(
-        find.text('First attempt. It can enter the high scores.'),
+        find.text(
+          'Saved on this device. Add a nickname to sync your high score.',
+        ),
         findsOneWidget,
       );
       expect(find.text('Submit high score'), findsOneWidget);
@@ -170,13 +172,20 @@ void main() {
           }
         }
         await tester.tap(find.text('Abandon'));
+        if (!duringCountdown) {
+          await tester.pump();
+          await tester.tap(find.text('Interrupted'));
+        }
         await tester.pump(const Duration(seconds: 3));
         expect(find.text('Start run'), findsOneWidget);
         expect(find.byKey(const ValueKey('countdown')), findsNothing);
         expect(find.byKey(const ValueKey('timer')), findsNothing);
         final player = await PlayerData.load();
         expect(await player.claimSeed('s2-1234abcd'), isFalse);
-        if (!duringCountdown) expect(player.practiceHistory.single.mistakes, 1);
+        if (!duringCountdown) {
+          expect(player.practiceHistory, isEmpty);
+          expect(player.attemptsHistory.single.mistakes, 1);
+        }
         await tester.ensureVisible(find.text('Run a seed'));
         await tester.tap(find.text('Run a seed'));
         await tester.pumpAndSettle();

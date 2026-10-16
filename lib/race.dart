@@ -36,30 +36,41 @@ class _RaceScreenState extends State<RaceScreen> {
   final boardClock = BoardClock();
   PracticeBoard? trackedBoard;
   int boardMistakes = 0;
+  List<int> pendingSolution = [];
 
   void syncPracticeClock() {
     final startAt = state?['startAt'] as int?;
-    final board = (state?['board'] as List<dynamic>?)?.cast<int>();
+    final board = state?['board'] as List<dynamic>?;
     if (!connected ||
         state?['ended'] == true ||
         startAt == null ||
         DateTime.now().millisecondsSinceEpoch + clockOffset < startAt ||
         board == null ||
         board.length != 12 ||
+        board.any((id) => id == null) ||
         boardClock.active) {
       return;
     }
-    trackedBoard = PracticeBoard(cards: [...board]);
+    trackedBoard = PracticeBoard(cards: board.cast<int>());
     boardMistakes = 0;
     boardClock.start();
   }
 
-  void rememberBoard() {
+  void rememberBoard({AttemptOutcome outcome = AttemptOutcome.solved}) {
     if (!boardClock.active || trackedBoard == null) return;
     boardClock.stop();
     widget.player
         .recordPractice(
-          trackedBoard!.result(boardClock.milliseconds, boardMistakes, false),
+          trackedBoard!.result(
+            boardClock.milliseconds,
+            boardMistakes,
+            false,
+            outcome: outcome,
+            source: 'race',
+            solutionCards: outcome == AttemptOutcome.solved
+                ? pendingSolution
+                : [],
+          ),
         )
         .catchError((Object error) {
           /* History must not interrupt a race. */
@@ -140,9 +151,7 @@ class _RaceScreenState extends State<RaceScreen> {
                   : nextPlayers[nextYou]['progress'] as int;
               if (nextProgress > oldProgress) rememberBoard();
               if (message['ended'] == true) {
-                if (boardClock.milliseconds >= 10000 || boardMistakes > 0) {
-                  rememberBoard();
-                }
+                rememberBoard(outcome: AttemptOutcome.interrupted);
                 boardClock.stop();
               }
               state = message;
@@ -176,6 +185,14 @@ class _RaceScreenState extends State<RaceScreen> {
         connecting = false;
         syncPracticeClock();
       });
+      final median = widget.player.benchmarkMedian;
+      if (median != null && widget.player.benchmarkCount >= 5) {
+        send({
+          'type': 'benchmark',
+          'medianMs': median,
+          'sampleCount': widget.player.benchmarkCount,
+        });
+      }
     } catch (_) {
       disconnected();
     }
@@ -183,6 +200,7 @@ class _RaceScreenState extends State<RaceScreen> {
 
   void disconnected() {
     if (!mounted || leaving) return;
+    rememberBoard(outcome: AttemptOutcome.interrupted);
     boardClock.stop();
     setState(() {
       connected = false;
@@ -201,7 +219,12 @@ class _RaceScreenState extends State<RaceScreen> {
   }
 
   void pick(int id) {
-    if (!connected || waiting || state?['ended'] == true) return;
+    if (!connected ||
+        waiting ||
+        state?['ended'] == true ||
+        (state?['board'] as List? ?? []).any((id) => id == null)) {
+      return;
+    }
     setState(() {
       if (selected.remove(id)) return;
       selected.add(id);
@@ -209,6 +232,7 @@ class _RaceScreenState extends State<RaceScreen> {
         if (!isSet(selected.map(SetCard.new).toList())) boardMistakes++;
         waiting = true;
         feedback = '';
+        pendingSolution = selected.toList();
         send({
           'type': 'pick',
           'round': ownProgress,
@@ -219,7 +243,7 @@ class _RaceScreenState extends State<RaceScreen> {
   }
 
   Future<void> leave() async {
-    if (boardClock.milliseconds >= 10000 || boardMistakes > 0) rememberBoard();
+    rememberBoard(outcome: AttemptOutcome.interrupted);
     boardClock.stop();
     leaving = true;
     send({'type': 'leave'});
@@ -235,6 +259,49 @@ class _RaceScreenState extends State<RaceScreen> {
     code.dispose();
     boardClock.dispose();
     super.dispose();
+  }
+
+  Widget handicapControls() {
+    final own = players[you] as Map<String, dynamic>;
+    final other = players.length == 2
+        ? players[1 - you] as Map<String, dynamic>
+        : null;
+    final mine = own['medianMs'] as num?;
+    final theirs = other?['medianMs'] as num?;
+    final suggestion = mine == null || theirs == null
+        ? null
+        : (((theirs - mine).clamp(0, 30000) / 100).round() * 100);
+    final delay = (own['handicapMs'] as num? ?? 0).toDouble();
+    return Column(
+      children: [
+        Text('Your card delay: ${(delay / 1000).toStringAsFixed(1)} s'),
+        Slider(
+          value: delay,
+          min: 0,
+          max: 30000,
+          divisions: 300,
+          label: '${(delay / 1000).toStringAsFixed(1)} s',
+          onChanged: (value) =>
+              send({'type': 'handicap', 'milliseconds': value.round()}),
+        ),
+        if (suggestion != null)
+          TextButton(
+            onPressed: () =>
+                send({'type': 'handicap', 'milliseconds': suggestion}),
+            child: Text(
+              'Use suggested ${(suggestion / 1000).toStringAsFixed(1)} s delay',
+            ),
+          ),
+        Text(
+          suggestion == null
+              ? 'A suggestion needs at least 5 unassisted full-board solves from each player.'
+              : 'Based on your recent median ${(mine! / 1000).toStringAsFixed(1)} s and your friend’s ${(theirs! / 1000).toStringAsFixed(1)} s (up to 100 solves each).',
+        ),
+        const Text(
+          'Delay applies to the opening deal and each replacement. Changing it resets both players’ readiness.',
+        ),
+      ],
+    );
   }
 
   @override
@@ -338,8 +405,12 @@ class _RaceScreenState extends State<RaceScreen> {
                             ? 'Ready'
                             : 'Getting ready',
                       ),
-                      trailing: Text('${players[i]['progress']} / 5'),
+                      trailing: Text(
+                        '${players[i]['progress']} / 5 · ${((players[i]['handicapMs'] as num? ?? 0) / 1000).toStringAsFixed(1)} s delay',
+                      ),
                     ),
+                  if (connected && !ended && startAt == null && you >= 0)
+                    handicapControls(),
                   if (connected && !ended && startAt == null)
                     FilledButton(
                       onPressed: you < 0 || players[you]['ready'] == true
@@ -402,6 +473,11 @@ class _RaceScreenState extends State<RaceScreen> {
                       onPressed: connect,
                       child: const Text('Reconnect'),
                     ),
+                  if (board.contains(null) && !ended && remaining <= 0)
+                    Text(
+                      'New cards in ${(((state?['revealAt'] as int? ?? 0) - DateTime.now().millisecondsSinceEpoch - clockOffset) / 1000).clamp(0, 30).toStringAsFixed(1)} s',
+                      textAlign: TextAlign.center,
+                    ),
                   if (board.isNotEmpty && !ended && remaining <= 0)
                     LayoutBuilder(
                       builder: (context, constraints) {
@@ -429,11 +505,18 @@ class _RaceScreenState extends State<RaceScreen> {
                               mainAxisSpacing: 10,
                               children: [
                                 for (final id in board)
-                                  CardView(
-                                    card: SetCard(id as int),
-                                    selected: selected.contains(id),
-                                    onTap: () => pick(id),
-                                  ),
+                                  if (id == null)
+                                    const Card(
+                                      child: Center(
+                                        child: Icon(Icons.hourglass_empty),
+                                      ),
+                                    )
+                                  else
+                                    CardView(
+                                      card: SetCard(id as int),
+                                      selected: selected.contains(id),
+                                      onTap: () => pick(id),
+                                    ),
                               ],
                             ),
                           ),

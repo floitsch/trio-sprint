@@ -2,6 +2,8 @@ import 'package:flutter/widgets.dart';
 
 import 'game.dart';
 
+enum AttemptOutcome { solved, timedOut, restarted, interrupted, skipped }
+
 /// A board as seen by the player, including any training constraints.
 class PracticeBoard {
   PracticeBoard({
@@ -11,6 +13,11 @@ class PracticeBoard {
     this.milliseconds = 0,
     this.mistakes = 0,
     this.assisted = false,
+    this.outcome = AttemptOutcome.solved,
+    this.source = 'legacy',
+    this.solutionCards = const [],
+    this.seed,
+    this.recordedAt,
   });
 
   final List<int> cards;
@@ -19,6 +26,19 @@ class PracticeBoard {
   final int milliseconds;
   final int mistakes;
   final bool assisted;
+  final AttemptOutcome outcome;
+  final String source;
+  final List<int> solutionCards;
+  final String? seed;
+  final int? recordedAt;
+  bool get countsForTraining => outcome != AttemptOutcome.interrupted;
+  bool get benchmark =>
+      outcome == AttemptOutcome.solved &&
+      !assisted &&
+      anchors.isEmpty &&
+      differences == null &&
+      source != 'legacy' &&
+      source != 'replay';
 
   String get key {
     final sorted = [...cards]..sort();
@@ -26,7 +46,14 @@ class PracticeBoard {
     return '$sorted/$fixed/$differences';
   }
 
-  int get difficulty => milliseconds + mistakes * 5000 + (assisted ? 15000 : 0);
+  int get difficulty =>
+      milliseconds +
+      mistakes * 5000 +
+      (assisted ||
+              outcome == AttemptOutcome.restarted ||
+              outcome == AttemptOutcome.skipped
+          ? 15000
+          : 0);
 
   bool accepts(List<SetCard> trio) =>
       isSet(trio) &&
@@ -52,16 +79,33 @@ class PracticeBoard {
     return null;
   }
 
-  PracticeBoard result(int elapsed, int errors, bool helped) => PracticeBoard(
+  PracticeBoard result(
+    int elapsed,
+    int errors,
+    bool helped, {
+    AttemptOutcome outcome = AttemptOutcome.solved,
+    String source = 'training',
+    List<int> solutionCards = const [],
+  }) => PracticeBoard(
     cards: cards,
     anchors: anchors,
     differences: differences,
     milliseconds: elapsed,
     mistakes: errors,
     assisted: helped,
+    outcome: outcome,
+    source: source,
+    solutionCards: solutionCards,
+    seed: seed,
+    recordedAt: DateTime.now().millisecondsSinceEpoch,
   );
 
   Map<String, dynamic> toJson() => {
+    'outcome': outcome.name,
+    'source': source,
+    'solutionCards': solutionCards,
+    'seed': seed,
+    'recordedAt': recordedAt,
     'cards': cards,
     'anchors': anchors,
     'differences': differences,
@@ -72,6 +116,13 @@ class PracticeBoard {
 
   factory PracticeBoard.fromJson(Map<String, dynamic> json) {
     final board = PracticeBoard(
+      outcome: AttemptOutcome.values.byName(
+        json['outcome'] as String? ?? 'solved',
+      ),
+      source: json['source'] as String? ?? 'legacy',
+      solutionCards: (json['solutionCards'] as List? ?? []).cast<int>(),
+      seed: json['seed'] as String?,
+      recordedAt: json['recordedAt'] as int?,
       cards: (json['cards'] as List).cast<int>(),
       anchors: (json['anchors'] as List).cast<int>(),
       differences: json['differences'] as int?,
@@ -86,6 +137,13 @@ class PracticeBoard {
         all.toSet().length != all.length ||
         (board.differences != null &&
             (board.differences! < 1 || board.differences! > 4)) ||
+        (board.solutionCards.isNotEmpty &&
+            (board.solutionCards.length != 3 ||
+                board.solutionCards.toSet().length != 3 ||
+                board.solutionCards.any((id) => !all.contains(id)) ||
+                !board.accepts(
+                  board.solutionCards.map(SetCard.new).toList(),
+                ))) ||
         board.milliseconds < 0 ||
         board.mistakes < 0 ||
         board.solution == null) {

@@ -106,11 +106,16 @@ void main() {
     await findSets(tester, 6);
     expect(find.text('6'), findsOneWidget);
     expect(find.text('Time’s up.'), findsNothing);
-    await tester.pump(const Duration(seconds: 61));
+    await tester.pump(const Duration(minutes: 1));
     expect(find.text('Time’s up.'), findsOneWidget);
     expect(find.byKey(const ValueKey('result-time')), findsOneWidget);
     expect(find.text('SETS IN ONE MINUTE'), findsOneWidget);
     expect(find.text('Your best run.'), findsOneWidget);
+    expect(find.byTooltip('How to play').hitTestable(), findsNothing);
+    await tester.pump(const Duration(milliseconds: 999));
+    expect(find.byTooltip('How to play').hitTestable(), findsNothing);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(find.byTooltip('How to play').hitTestable(), findsOneWidget);
     expect(find.text('Submit high score'), findsOneWidget);
     final player = await PlayerData.load();
     expect(player.timedBest(RunMode.oneMinute)!.sets, 6);
@@ -143,6 +148,9 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Submit high score'), findsNothing);
+    expect(find.byTooltip('How to play').hitTestable(), findsNothing);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byTooltip('How to play').hitTestable(), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 }

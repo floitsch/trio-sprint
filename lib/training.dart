@@ -76,13 +76,24 @@ class _TrainingScreenState extends State<TrainingScreen> {
     });
   }
 
-  void remember({bool skipped = false}) {
+  void remember({bool skipped = false, bool interrupted = false}) {
     if (recorded || exercise == null) return;
     recorded = true;
     clock.stop();
     widget.player
         ?.recordPractice(
-          exercise!.result(clock.milliseconds, mistakes, hinted || skipped),
+          exercise!.result(
+            clock.milliseconds,
+            mistakes,
+            hinted || skipped,
+            outcome: interrupted
+                ? AttemptOutcome.interrupted
+                : skipped
+                ? AttemptOutcome.skipped
+                : AttemptOutcome.solved,
+            source: reviewing ? 'review' : 'training',
+            solutionCards: solved ? [...exercise!.anchors, ...selected] : [],
+          ),
         )
         .catchError((Object error) {
           if (mounted) setState(() => storageFailed = true);
@@ -91,8 +102,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
   void quit() {
     advance?.cancel();
-    // Preserve a board that was proving difficult when the player quit.
-    if (clock.milliseconds >= 10000 || mistakes > 0 || hinted) remember();
+    // Quitting alone is not evidence that this board was difficult.
+    remember(interrupted: true);
     clock.stop();
     setState(() => exercise = null);
   }

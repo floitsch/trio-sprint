@@ -58,3 +58,10 @@ window.trioClaimSeed = async seed => {
 };
 window.trioSeedAttempted = seed =>
   localStorage.getItem('trio-attempt:' + seed) !== null;
+
+// Hints only: a browser can report online behind a captive portal. The outbox
+// retains data until the server acknowledges it, regardless of this signal.
+let onlineListener;
+window.addEventListener('online', () => onlineListener?.());
+window.trioOnOnline = listener => { onlineListener = listener; };
+window.trioOfflineReady = () => !!navigator.serviceWorker?.controller;

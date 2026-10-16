@@ -1,4 +1,6 @@
 // Copyright (C) 2026 Toit contributors.
+import { validHandicap, visibleBoard, delayBoard } from './handicap.js';
+import { validAttempts, saveAttempts } from './attempts.js';
 import { DurableObject } from 'cloudflare:workers';
 import { SeededRun, seededBoards, validName, validPlayer, validSeed, validateScore } from './game.js';
 import { registerDevice, deviceCount, pairingCode, linkDevices, scoreQuery, insertScoreQuery, existingScoreQuery } from './players.js';
@@ -48,6 +50,12 @@ export default {
       if (url.pathname === '/players/merge' && request.method === 'POST') {
         const result = await linkDevices(env.DB, await readJson(request));
         return json(result, result.status ?? 200);
+      }
+      if (url.pathname === '/attempts' && request.method === 'POST') {
+        const body = await readJson(request);
+        if (!validAttempts(body)) return json({ error: 'Invalid board history' }, 400);
+        await saveAttempts(env.DB, body);
+        return json({ ok: true });
       }
       if (url.pathname === '/scores' && request.method === 'GET') {
         const seed = url.searchParams.get('seed');
@@ -107,6 +115,12 @@ export class RaceRoom extends DurableObject {
     ctx.blockConcurrencyWhile(async () => { this.game = await ctx.storage.get('game'); });
   }
   async save() { await this.ctx.storage.put('game', this.game); }
+  async schedule() {
+    const now = Date.now();
+    const times = [this.game.expires, this.game.startAt,
+      ...this.game.players.map(p => p.revealAt)].filter(t => t > now);
+    await this.ctx.storage.setAlarm(Math.min(...times));
+  }
   connected(token) {
     return this.ctx.getWebSockets(token).some(socket => socket.readyState === WebSocket.OPEN);
   }
@@ -156,9 +170,11 @@ export class RaceRoom extends DurableObject {
     const started = game.startAt && Date.now() >= game.startAt;
     return { type: 'state', now: Date.now(), startAt: game.startAt, ended: game.ended,
       winner: game.winner, you: game.players.indexOf(own),
-      seed: started || game.ended ? game.seed : null,
-      board: started && !game.ended ? this.runFor(own).board : [],
+      seed: game.ended ? game.seed : null,
+      revealAt: own?.revealAt ?? null,
+      board: started && !game.ended ? visibleBoard(this.runFor(own).board, own, Date.now()) : [],
       players: game.players.map(p => ({ name: p.name, progress: p.progress, mistakes: p.mistakes,
+        handicapMs: p.handicapMs ?? 0, medianMs: p.medianMs ?? null, sampleCount: p.sampleCount ?? 0,
         ready: p.ready, connected: this.connected(p.token) })),
     };
   }
@@ -176,16 +192,33 @@ export class RaceRoom extends DurableObject {
     const token = socket.deserializeAttachment().token;
     const player = this.game.players.find(p => p.token === token);
     if (!player) return;
-    if (data.type === 'ready' && !this.game.startAt) {
+    if (data.type === 'handicap' && !this.game.startAt) {
+      if (!validHandicap(data.milliseconds)) return;
+      player.handicapMs = data.milliseconds;
+      // A changed delay must be acknowledged again by both players.
+      for (const p of this.game.players) p.ready = false;
+    } else if (data.type === 'benchmark' && !this.game.startAt) {
+      if (Number.isFinite(data.medianMs) && data.medianMs > 0 && data.medianMs <= 3600000 &&
+          Number.isInteger(data.sampleCount) && data.sampleCount >= 5) {
+        player.medianMs = data.medianMs;
+        player.sampleCount = data.sampleCount;
+      }
+    } else if (data.type === 'ready' && !this.game.startAt) {
       player.ready = true;
       if (this.game.players.length === 2 && this.game.players.every(p => p.ready && this.connected(p.token))) {
         this.game.startAt = Date.now() + 3000;
-        await this.ctx.storage.setAlarm(this.game.startAt);
+        for (const p of this.game.players) {
+          delayBoard(p, [], this.runFor(p).board, this.game.startAt);
+        }
+        await this.schedule();
       }
     } else if (data.type === 'pick' && this.game.startAt && Date.now() >= this.game.startAt) {
+      if (Date.now() < (player.revealAt ?? 0)) return;
       if (data.round !== player.progress) { this.broadcast(); return; }
       const run = this.runFor(player);
+      const before = [...run.board];
       if (run.pick(data.cards)) {
+        delayBoard(player, before, run.board, Date.now());
         (player.solutions ??= []).push(data.cards);
         player.progress++;
         if (player.progress === 5) {
@@ -206,6 +239,7 @@ export class RaceRoom extends DurableObject {
       }
     }
     await this.save();
+    await this.schedule();
     this.broadcast();
   }
   async webSocketClose(socket, code, reason) {
@@ -222,7 +256,7 @@ export class RaceRoom extends DurableObject {
       this.game = undefined;
     } else {
       this.broadcast();
-      await this.ctx.storage.setAlarm(this.game.expires);
+      await this.schedule();
     }
   }
 }
