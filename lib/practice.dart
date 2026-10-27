@@ -18,6 +18,7 @@ class PracticeBoard {
     this.solutionCards = const [],
     this.seed,
     this.recordedAt,
+    this.runId,
   });
 
   final List<int> cards;
@@ -31,6 +32,7 @@ class PracticeBoard {
   final List<int> solutionCards;
   final String? seed;
   final int? recordedAt;
+  final String? runId;
   bool get countsForTraining => outcome != AttemptOutcome.interrupted;
   bool get benchmark =>
       outcome == AttemptOutcome.solved &&
@@ -106,6 +108,7 @@ class PracticeBoard {
     'solutionCards': solutionCards,
     'seed': seed,
     'recordedAt': recordedAt,
+    'runId': runId,
     'cards': cards,
     'anchors': anchors,
     'differences': differences,
@@ -123,6 +126,7 @@ class PracticeBoard {
       solutionCards: (json['solutionCards'] as List? ?? []).cast<int>(),
       seed: json['seed'] as String?,
       recordedAt: json['recordedAt'] as int?,
+      runId: json['runId'] as String?,
       cards: (json['cards'] as List).cast<int>(),
       anchors: (json['anchors'] as List).cast<int>(),
       differences: json['differences'] as int?,

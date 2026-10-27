@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'game.dart';
 import 'practice.dart';
+import 'run_history.dart';
 
 import 'attempt_stub.dart'
     if (dart.library.js_interop) 'attempt_web.dart'
@@ -137,6 +138,29 @@ class PlayerData {
     }
     return records;
   }
+
+  List<RunRecord> get runHistory {
+    final saved = <RunRecord>[];
+    for (final raw
+        in preferences.getStringList('run-history-v1') ?? <String>[]) {
+      try {
+        saved.add(RunRecord.fromJson(jsonDecode(raw) as Map<String, dynamic>));
+      } catch (_) {
+        // Keep the rest of the history available if an entry is damaged.
+      }
+    }
+    return restoreRunHistory(saved, attemptsHistory, savedScores);
+  }
+
+  Future<void> recordRun(RunRecord run) => _serialize(() async {
+    final records = preferences.getStringList('run-history-v1') ?? <String>[];
+    if (!await preferences.setStringList('run-history-v1', [
+      ...records,
+      jsonEncode(run.toJson()),
+    ])) {
+      throw StateError('Could not save run statistics.');
+    }
+  });
 
   double? get benchmarkMedian => medianMilliseconds(
     attemptsHistory

@@ -86,8 +86,17 @@ Leaving the app does not pause the stopwatch.
 - **Statistics:** every new board attempt is saved locally with its layout,
   actual solution when solved, active viewing time, mistakes, assistance, mode,
   timestamp and outcome. Statistics shows solved counts, median unassisted
-  solving time, the fastest unassisted set with its layout, and recent attempts.
-  Filter modes to separate sprint, timed runs, replays and training. Existing
+  solving time and the fastest unassisted set with its layout. Recent runs show
+  the number of sets for completed timed runs, finish times for sprints, and an
+  abandoned label for unfinished runs. Completed timed runs also have an average
+  score for the selected period, including runs with zero sets. Individual board
+  attempts can be expanded for review. Hints are available in Training, including
+  **Cards I was slow on**, and hinted solves are counted separately.
+  Filter modes to separate sprint, timed runs, replays and training; choose all
+  time, today, the last 7/30/90 days, or custom inclusive dates to compare progress.
+  Older runs are recovered from saved board history and scores where possible;
+  sprint times recovered only from boards are labeled as active time, and undated
+  old scores only appear under all time. Existing
   training history is preserved but cannot be retroactively counted as solves.
   Interrupted attempts never affect difficult-board ranking; **Restart** and
   **Abandon → Too slow** retain the unfinished board for training. Timed-out

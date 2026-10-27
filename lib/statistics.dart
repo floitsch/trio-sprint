@@ -5,9 +5,33 @@ import 'card_board.dart';
 import 'data.dart';
 import 'game.dart';
 import 'practice.dart';
+import 'run_history.dart';
 
 String seconds(num milliseconds) =>
     '${(milliseconds / 1000).toStringAsFixed(2)} s';
+
+enum StatisticsPeriod {
+  all('All time'),
+  today('Today'),
+  week('Last 7 days'),
+  month('Last 30 days'),
+  quarter('Last 90 days'),
+  custom('Custom dates');
+
+  const StatisticsPeriod(this.label);
+  final String label;
+}
+
+String statisticsDate(BuildContext context, int? timestamp) => timestamp == null
+    ? 'Date unavailable'
+    : MaterialLocalizations.of(context)
+          .formatMediumDate(DateTime.fromMillisecondsSinceEpoch(timestamp));
+
+String runScore(RunRecord run) {
+  if (!run.completed) return 'Abandoned';
+  if (run.mode.timed) return '${run.sets} sets';
+  return run.milliseconds == null ? 'Completed' : seconds(run.milliseconds!);
+}
 
 class StatisticsScreen extends StatefulWidget {
   const StatisticsScreen({super.key, required this.player});
@@ -18,27 +42,116 @@ class StatisticsScreen extends StatefulWidget {
 
 class _StatisticsScreenState extends State<StatisticsScreen> {
   String? source;
+  StatisticsPeriod period = StatisticsPeriod.all;
+  DateTimeRange? customRange;
+
+  Future<void> selectPeriod(StatisticsPeriod value) async {
+    if (value == StatisticsPeriod.custom) {
+      final today = DateUtils.dateOnly(DateTime.now());
+      final range = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(2000),
+        lastDate: today,
+        initialDateRange:
+            customRange ??
+            DateTimeRange(
+              start: DateTime(today.year, today.month, today.day - 29),
+              end: today,
+            ),
+      );
+      if (!mounted || range == null) return;
+      customRange = range;
+    }
+    setState(() => period = value);
+  }
+
   @override
   Widget build(BuildContext context) {
     final history = widget.player.attemptsHistory;
+    final runHistory = widget.player.runHistory;
+    final now = DateTime.now();
+    final today = DateUtils.dateOnly(now);
+    final days = switch (period) {
+      StatisticsPeriod.today => 1,
+      StatisticsPeriod.week => 7,
+      StatisticsPeriod.month => 30,
+      StatisticsPeriod.quarter => 90,
+      _ => null,
+    };
+    final start = days == null
+        ? customRange?.start
+        : DateTime(today.year, today.month, today.day - days + 1);
+    final endDate = period == StatisticsPeriod.custom
+        ? customRange?.end
+        : today;
+    final end = endDate == null
+        ? null
+        : DateTime(endDate.year, endDate.month, endDate.day + 1);
+    bool inPeriod(int? timestamp) =>
+        period == StatisticsPeriod.all ||
+        (timestamp != null &&
+            timestamp >= start!.millisecondsSinceEpoch &&
+            timestamp < end!.millisecondsSinceEpoch);
     final records = history
-        .where((a) => source == null || a.source == source)
+        .where(
+          (a) =>
+              (source == null || a.source == source) && inPeriod(a.recordedAt),
+        )
         .toList();
+    final runs = runHistory
+        .where(
+          (r) =>
+              (source == null || r.source == source) && inPeriod(r.recordedAt),
+        )
+        .toList();
+    final completedRuns = runs.where((r) => r.completed).toList();
+    final timedRuns = {
+      for (final mode in RunMode.values.where((m) => m.timed))
+        mode: completedRuns.where((r) => r.mode == mode).toList(),
+    };
     final solved = records
         .where((a) => a.outcome == AttemptOutcome.solved)
         .toList();
     final unassisted = solved.where((a) => !a.assisted).toList()
       ..sort((a, b) => a.milliseconds.compareTo(b.milliseconds));
     final median = medianMilliseconds(unassisted.map((a) => a.milliseconds));
-    final sources = history.map((a) => a.source).toSet().toList()..sort();
+    final sources = {
+      ...history.map((a) => a.source),
+      ...runHistory.map((r) => r.source),
+    }.toList()..sort();
     return Scaffold(
       appBar: AppBar(title: const Text('Statistics')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           const Text(
-            'Saved on this device from now on. Earlier training history cannot identify solved sets reliably.',
+            'Statistics are saved on this device. Choose a mode and date range to compare your progress.',
           ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: const InputDecoration(labelText: 'Time period'),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<StatisticsPeriod>(
+                value: period,
+                isExpanded: true,
+                items: [
+                  for (final value in StatisticsPeriod.values)
+                    DropdownMenuItem(value: value, child: Text(value.label)),
+                ],
+                onChanged: (value) {
+                  if (value != null) selectPeriod(value);
+                },
+              ),
+            ),
+          ),
+          if (period == StatisticsPeriod.custom)
+            TextButton(
+              onPressed: () => selectPeriod(StatisticsPeriod.custom),
+              child: Text(
+                '${statisticsDate(context, customRange!.start.millisecondsSinceEpoch)} – '
+                '${statisticsDate(context, customRange!.end.millisecondsSinceEpoch)}',
+              ),
+            ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -57,11 +170,27 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
             ],
           ),
           ListTile(
+            title: const Text('Completed runs'),
+            trailing: Text('${completedRuns.length}'),
+          ),
+          for (final entry in timedRuns.entries)
+            if (entry.value.isNotEmpty)
+              ListTile(
+                title: Text('${sourceLabel(entry.key.prefix)} · average score'),
+                subtitle: Text('${entry.value.length} completed runs'),
+                trailing: Text(
+                  '${(entry.value.fold<int>(0, (sum, r) => sum + r.sets) / entry.value.length).toStringAsFixed(1)} sets',
+                ),
+              ),
+          ListTile(
             title: const Text('Solved sets'),
             trailing: Text('${solved.length}'),
           ),
           ListTile(
             title: const Text('Solved with hints'),
+            subtitle: const Text(
+              'Hints are available in Training, including Cards I was slow on.',
+            ),
             trailing: Text('${solved.where((a) => a.assisted).length}'),
           ),
           ListTile(
@@ -70,7 +199,11 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           ),
           if (unassisted.isNotEmpty)
             ListTile(
-              title: const Text('Fastest ever set (unassisted)'),
+              title: Text(
+                period == StatisticsPeriod.all
+                    ? 'Fastest ever set (unassisted)'
+                    : 'Fastest set (unassisted)',
+              ),
               subtitle: const Text('View the layout and your solution'),
               trailing: Text(seconds(unassisted.first.milliseconds)),
               onTap: () => review(unassisted.first, 'Fastest set'),
@@ -88,17 +221,53 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
             'Times measure active viewing and exclude time in the background. Unfinished attempts never enter solving-time statistics. Training and replays can be filtered separately.',
           ),
           const SizedBox(height: 16),
-          const Text('Recent attempts', style: TextStyle(fontSize: 20)),
-          for (final record in records.reversed.take(100))
+          const Text('Recent runs', style: TextStyle(fontSize: 20)),
+          if (runs.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text('No runs in this period.'),
+            ),
+          for (final run in runs.take(100))
             ListTile(
               title: Text(
-                '${outcomeLabel(record.outcome)} · ${sourceLabel(record.source)}',
+                '${sourceLabel(run.seed.split('-').first)}${run.source == 'replay' ? ' · Practice replay' : ''}',
               ),
               subtitle: Text(
-                '${seconds(record.milliseconds)} · ${record.mistakes} mistakes${record.assisted ? ' · assisted' : ''}',
+                [
+                  statisticsDate(context, run.recordedAt),
+                  run.seed,
+                  '${run.mistakes} mistakes',
+                  if (run.completed &&
+                      run.mode.timed &&
+                      run.sets > 0 &&
+                      run.milliseconds != null)
+                    'Last set at ${seconds(run.milliseconds!)}',
+                  if (run.completed && run.activeTimeOnly) 'Active time only',
+                ].join(' · '),
               ),
-              onTap: () => review(record, 'Saved board'),
+              trailing: Text(runScore(run)),
             ),
+          const SizedBox(height: 16),
+          ExpansionTile(
+            title: const Text('Individual board attempts'),
+            tilePadding: EdgeInsets.zero,
+            children: [
+              if (records.isEmpty)
+                const ListTile(
+                  title: Text('No board attempts in this period.'),
+                ),
+              for (final record in records.reversed.take(100))
+                ListTile(
+                  title: Text(
+                    '${outcomeLabel(record.outcome)} · ${sourceLabel(record.source)}',
+                  ),
+                  subtitle: Text(
+                    '${statisticsDate(context, record.recordedAt)} · ${seconds(record.milliseconds)} · ${record.mistakes} mistakes${record.assisted ? ' · assisted' : ''}',
+                  ),
+                  onTap: () => review(record, 'Saved board'),
+                ),
+            ],
+          ),
         ],
       ),
     );

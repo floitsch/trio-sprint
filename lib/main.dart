@@ -17,6 +17,7 @@ import 'race.dart';
 import 'install.dart';
 import 'update.dart';
 import 'practice.dart';
+import 'run_history.dart';
 
 void main() => runApp(const TrioSprintApp());
 
@@ -86,6 +87,31 @@ class _GameScreenState extends State<GameScreen> {
   bool updateReady = false;
   // When the last set of a timed run was found.
   Duration lastSet = Duration.zero;
+  String? runId;
+
+  void rememberRun({required bool completed}) {
+    final id = runId;
+    if (id == null) return;
+    runId = null;
+    player
+        ?.recordRun(
+          RunRecord(
+            id: id,
+            seed: game.seed!,
+            source: eligible ? game.seed!.split('-').first : 'replay',
+            completed: completed,
+            sets: game.streak,
+            mistakes: game.mistakes,
+            milliseconds: game.mode.timed
+                ? lastSet.inMilliseconds
+                : watch.elapsedMilliseconds,
+            recordedAt: DateTime.now().millisecondsSinceEpoch,
+          ),
+        )
+        .catchError((Object error) {
+          /* History must not interrupt a sprint. */
+        });
+  }
 
   void rememberBoard({
     AttemptOutcome outcome = AttemptOutcome.solved,
@@ -105,10 +131,11 @@ class _GameScreenState extends State<GameScreen> {
                 : boardClock.milliseconds,
             mistakes: boardMistakes,
             outcome: outcome,
-            source: eligible ? game.mode.prefix : 'replay',
+            source: eligible ? game.seed!.split('-').first : 'replay',
             seed: game.seed,
             solutionCards: solution,
             recordedAt: DateTime.now().millisecondsSinceEpoch,
+            runId: runId,
           ),
         )
         .catchError((Object error) {
@@ -326,6 +353,7 @@ class _GameScreenState extends State<GameScreen> {
     starting = true;
     final generation = ++runGeneration;
     rememberBoard(outcome: AttemptOutcome.restarted);
+    rememberRun(completed: false);
     boardClock.stop();
     boardMistakes = 0;
     stopClocks();
@@ -375,6 +403,7 @@ class _GameScreenState extends State<GameScreen> {
     elapsed.value = Duration.zero;
     setState(() {
       game = SetGame(seed: chosenSeed);
+      runId = randomId();
       mode = game.mode;
       final previousBest = player?.bestForSeed(chosenSeed);
       best = previousBest == null ? null : Duration(milliseconds: previousBest);
@@ -436,6 +465,7 @@ class _GameScreenState extends State<GameScreen> {
     starting = false;
     stopClocks();
     rememberBoard(outcome: outcome);
+    rememberRun(completed: false);
     boardClock.stop();
     setState(() => phase = Phase.ready);
   }
@@ -445,6 +475,7 @@ class _GameScreenState extends State<GameScreen> {
     stopClocks();
     elapsed.value = game.mode.limit!;
     rememberBoard(outcome: AttemptOutcome.timedOut);
+    rememberRun(completed: true);
     boardClock.stop();
     final score = TimedScore(game.streak, lastSet.inMilliseconds);
     setState(() {
@@ -497,6 +528,7 @@ class _GameScreenState extends State<GameScreen> {
           HapticFeedback.selectionClick();
         case PickResult.finished:
           stopClocks();
+          rememberRun(completed: true);
           newBest = eligible && (best == null || watch.elapsed < best!);
           if (newBest) best = watch.elapsed;
           if (eligible) {

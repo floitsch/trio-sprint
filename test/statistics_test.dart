@@ -8,6 +8,7 @@ import 'package:trio_sprint/practice.dart';
 import 'package:trio_sprint/statistics.dart';
 import 'package:trio_sprint/card_view.dart';
 import 'package:trio_sprint/main.dart';
+import 'package:trio_sprint/run_history.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -17,12 +18,14 @@ void main() {
     AttemptOutcome outcome = AttemptOutcome.solved,
     String source = 's2',
     bool assisted = false,
+    int? recordedAt,
   }) => PracticeBoard(
     cards: cards,
     milliseconds: ms,
     source: source,
     outcome: outcome,
     assisted: assisted,
+    recordedAt: recordedAt,
     solutionCards: outcome == AttemptOutcome.solved
         ? findSet(cards.map(SetCard.new).toList())!.map((c) => c.id).toList()
         : [],
@@ -77,6 +80,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: StatisticsScreen(player: player)),
     );
+    await tester.ensureVisible(find.text('Fastest ever set (unassisted)'));
     await tester.tap(find.text('Fastest ever set (unassisted)'));
     await tester.pumpAndSettle();
     expect(
@@ -99,6 +103,166 @@ void main() {
       3,
     );
     expect(player.attemptsHistory.length, 1);
+  });
+
+  String tileValue(WidgetTester tester, String title) {
+    final tile = tester.widget<ListTile>(
+      find.ancestor(of: find.text(title), matching: find.byType(ListTile)),
+    );
+    return (tile.trailing! as Text).data!;
+  }
+
+  Future<void> selectPeriod(WidgetTester tester, String label) async {
+    final dropdown = find.byType(DropdownButton<StatisticsPeriod>);
+    if (dropdown.evaluate().isEmpty) {
+      await tester.scrollUntilVisible(dropdown, -400);
+    }
+    await tester.ensureVisible(dropdown);
+    await tester.tap(dropdown);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(label).last);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('period and mode filters update totals, medians and run scores', (
+    tester,
+  ) async {
+    final player = await PlayerData.load();
+    final today = DateUtils.dateOnly(DateTime.now());
+    final recent = today.millisecondsSinceEpoch;
+    final old = DateTime(
+      today.year,
+      today.month,
+      today.day - 40,
+    ).millisecondsSinceEpoch;
+    await player.recordPractice(attempt(1000, source: '1m', recordedAt: old));
+    await player.recordPractice(
+      attempt(6000, source: '1m', recordedAt: recent),
+    );
+    await player.recordPractice(
+      attempt(3000, source: '1m', recordedAt: recent, assisted: true),
+    );
+    await player.recordPractice(attempt(500, source: '3m', recordedAt: recent));
+    for (final run in [
+      RunRecord(
+        id: 'old',
+        seed: '1m-1234abcd',
+        source: '1m',
+        completed: true,
+        sets: 2,
+        mistakes: 0,
+        recordedAt: old,
+      ),
+      RunRecord(
+        id: 'recent',
+        seed: '1m-00000000',
+        source: '1m',
+        completed: true,
+        sets: 5,
+        mistakes: 0,
+        milliseconds: 55000,
+        recordedAt: recent,
+      ),
+      RunRecord(
+        id: 'abandoned',
+        seed: '1m-00000001',
+        source: '1m',
+        completed: false,
+        sets: 50,
+        mistakes: 0,
+        recordedAt: recent,
+      ),
+      RunRecord(
+        id: 'other-mode',
+        seed: '3m-1234abcd',
+        source: '3m',
+        completed: true,
+        sets: 8,
+        mistakes: 0,
+        recordedAt: recent,
+      ),
+      const RunRecord(
+        id: 'undated',
+        seed: '1m-00000002',
+        source: '1m',
+        completed: true,
+        sets: 4,
+        mistakes: 0,
+      ),
+    ]) {
+      await player.recordRun(run);
+    }
+    await tester.pumpWidget(
+      MaterialApp(home: StatisticsScreen(player: player)),
+    );
+    expect(tileValue(tester, 'Completed runs'), '4');
+    expect(tileValue(tester, '1 minute · average score'), '3.7 sets');
+    await selectPeriod(tester, 'Today');
+    expect(tileValue(tester, 'Completed runs'), '2');
+    expect(tileValue(tester, 'Solved sets'), '3');
+    expect(tileValue(tester, '1 minute · average score'), '5.0 sets');
+    await tester.tap(find.widgetWithText(ChoiceChip, '1 minute'));
+    await tester.pumpAndSettle();
+    expect(tileValue(tester, 'Completed runs'), '1');
+    expect(tileValue(tester, 'Solved sets'), '2');
+    expect(tileValue(tester, 'Solved with hints'), '1');
+    expect(tileValue(tester, 'Median solving time (unassisted)'), '6.00 s');
+    expect(find.text('Fastest set (unassisted)'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Recent runs'), 400);
+    expect(find.text('5 sets'), findsOneWidget);
+    expect(find.text('Abandoned'), findsOneWidget);
+    expect(find.text('2 sets'), findsNothing);
+    expect(find.text('8 sets'), findsNothing);
+    expect(find.text('4 sets'), findsNothing);
+    await selectPeriod(tester, 'All time');
+    expect(tileValue(tester, 'Completed runs'), '3');
+    expect(tileValue(tester, 'Solved sets'), '3');
+    expect(tileValue(tester, 'Median solving time (unassisted)'), '3.50 s');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('custom dates include both full days and can be cancelled', (
+    tester,
+  ) async {
+    final player = await PlayerData.load();
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, now.day - 10);
+    final end = DateTime(now.year, now.month, now.day - 8);
+    for (final date in [
+      start.subtract(const Duration(milliseconds: 1)),
+      start,
+      DateTime(end.year, end.month, end.day, 23, 59, 59, 999),
+      DateTime(end.year, end.month, end.day + 1),
+    ]) {
+      await player.recordPractice(
+        attempt(2000, recordedAt: date.millisecondsSinceEpoch),
+      );
+    }
+    await tester.pumpWidget(
+      MaterialApp(home: StatisticsScreen(player: player)),
+    );
+    await selectPeriod(tester, 'Custom dates');
+    final localizations = MaterialLocalizations.of(
+      tester.element(find.byType(DateRangePickerDialog)),
+    );
+    await tester.tap(find.byTooltip(localizations.inputDateModeButtonLabel));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byType(TextField).at(0),
+      localizations.formatCompactDate(start),
+    );
+    await tester.enterText(
+      find.byType(TextField).at(1),
+      localizations.formatCompactDate(end),
+    );
+    await tester.tap(find.text(localizations.okButtonLabel));
+    await tester.pumpAndSettle();
+    expect(tileValue(tester, 'Solved sets'), '2');
+    await selectPeriod(tester, 'Custom dates');
+    await tester.tap(find.byTooltip(localizations.closeButtonTooltip));
+    await tester.pumpAndSettle();
+    expect(tileValue(tester, 'Solved sets'), '2');
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('restart and Too slow retain unfinished boards for training', (

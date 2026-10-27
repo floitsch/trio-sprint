@@ -119,6 +119,14 @@ void main() {
     expect(find.text('Submit high score'), findsOneWidget);
     final player = await PlayerData.load();
     expect(player.timedBest(RunMode.oneMinute)!.sets, 6);
+    expect(player.runHistory, hasLength(1));
+    expect(player.runHistory.single.completed, isTrue);
+    expect(player.runHistory.single.sets, 6);
+    expect(player.runHistory.single.seed, seed);
+    expect(
+      player.runHistory.single.milliseconds,
+      player.timedBest(RunMode.oneMinute)!.milliseconds,
+    );
     expect(player.mode, RunMode.oneMinute);
     // Play again stays in the same mode.
     await tester.ensureVisible(find.text('Play again'));
@@ -151,6 +159,9 @@ void main() {
     expect(find.byTooltip('How to play').hitTestable(), findsNothing);
     await tester.pump(const Duration(seconds: 1));
     expect(find.byTooltip('How to play').hitTestable(), findsOneWidget);
+    final player = await PlayerData.load();
+    expect(player.runHistory.single.completed, isTrue);
+    expect(player.runHistory.single.sets, 0);
     await tester.pumpWidget(const SizedBox());
   });
 }

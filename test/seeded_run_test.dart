@@ -129,6 +129,16 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Submit high score'), findsOneWidget);
+      final player = await PlayerData.load();
+      expect(player.runHistory, hasLength(2));
+      final completed = player.runHistory.where((r) => r.completed).single;
+      expect(completed.seed, fresh);
+      expect(completed.sets, 5);
+      expect(completed.milliseconds, player.best);
+      expect(
+        player.runHistory.where((r) => !r.completed).single.seed,
+        original,
+      );
       await tester.ensureVisible(find.text('Replay seed (practice)'));
       await tester.tap(find.text('Replay seed (practice)'));
       await tester.pumpAndSettle();
@@ -181,6 +191,8 @@ void main() {
         expect(find.byKey(const ValueKey('countdown')), findsNothing);
         expect(find.byKey(const ValueKey('timer')), findsNothing);
         final player = await PlayerData.load();
+        expect(player.runHistory.single.completed, isFalse);
+        expect(player.runHistory.single.seed, 's2-1234abcd');
         expect(await player.claimSeed('s2-1234abcd'), isFalse);
         if (!duringCountdown) {
           expect(player.practiceHistory, isEmpty);
