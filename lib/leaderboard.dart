@@ -18,7 +18,8 @@ Future<bool> editNickname(BuildContext context, PlayerData player) async {
         autofocus: true,
         decoration: const InputDecoration(
           hintText: 'What should your friends see?',
-          helperText: 'Shown on future scores.',
+          helperText: 'Shown on future scores and your total solved sets.',
+          helperMaxLines: 2,
         ),
       ),
       actions: [
@@ -49,9 +50,11 @@ class LeaderboardScreen extends StatefulWidget {
     required this.player,
     this.seed,
     this.mode = RunMode.sprint,
+    this.api,
   });
   final PlayerData? player;
   final String? seed;
+  final OnlineApi? api;
 
   /// The mode to show without a seed. A seed implies its own mode.
   final RunMode mode;
@@ -63,10 +66,49 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
   late bool unique = widget.player?.unique ?? true;
   late String? seed = widget.seed;
   late RunMode mode = seed == null ? widget.mode : RunMode.of(seed!);
-  late Future<List<Score>> scores = load();
+  late final OnlineApi api = widget.api ?? OnlineApi();
+  bool showTotalSets = false;
+  Future<List<SetTotalScore>>? totals;
+  Future<List<Score>>? scores;
   Future<List<Score>> load() =>
-      OnlineApi().scores(unique: unique, mode: mode, seed: seed);
-  void refresh() => setState(() => scores = load());
+      api.scores(unique: unique, mode: mode, seed: seed);
+  void refresh() => setState(() {
+    if (showTotalSets) {
+      totals = null;
+    } else {
+      scores = null;
+    }
+  });
+
+  Widget scoreList<T>(
+    Future<List<T>> future,
+    Widget Function(T row, int index) buildRow, {
+    required String emptyText,
+  }) => FutureBuilder<List<T>>(
+    future: future,
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              'Could not load scores. ${snapshot.error}',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        );
+      }
+      if (!snapshot.hasData) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      final rows = snapshot.data!;
+      if (rows.isEmpty) return Center(child: Text(emptyText));
+      return ListView.builder(
+        itemCount: rows.length,
+        itemBuilder: (context, index) => buildRow(rows[index], index),
+      );
+    },
+  );
 
   Future<void> chooseSeed() async {
     final controller = TextEditingController(text: seed ?? '');
@@ -190,89 +232,105 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                 trailing: TextButton(
                   onPressed: () async {
                     if (await editNickname(context, player) && mounted) {
-                      setState(() {});
+                      refresh();
                     }
                   },
                   child: Text(player.nickname.isEmpty ? 'Set name' : 'Change'),
                 ),
               ),
-            SwitchListTile(
-              title: const Text('Only each player’s best'),
-              subtitle: const Text(
-                'Hide additional runs from the same player, including linked devices.',
+            if (!showTotalSets)
+              SwitchListTile(
+                title: const Text('Only each player’s best'),
+                subtitle: const Text(
+                  'Hide additional runs from the same player, including linked devices.',
+                ),
+                value: unique,
+                onChanged: (value) {
+                  unique = value;
+                  widget.player?.setUnique(value);
+                  refresh();
+                },
               ),
-              value: unique,
-              onChanged: (value) {
-                unique = value;
-                widget.player?.setUnique(value);
-                refresh();
-              },
-            ),
-            SegmentedButton<RunMode>(
+            SegmentedButton<String>(
               showSelectedIcon: false,
               segments: [
                 for (final mode in RunMode.values)
-                  ButtonSegment(value: mode, label: Text(mode.shortLabel)),
+                  ButtonSegment(
+                    value: mode.prefix,
+                    label: Text(mode.shortLabel),
+                  ),
+                const ButtonSegment(
+                  value: 'total-sets',
+                  label: Text('Total sets'),
+                ),
               ],
-              selected: {mode},
+              selected: {showTotalSets ? 'total-sets' : mode.prefix},
               onSelectionChanged: (selection) {
-                mode = selection.single;
-                if (seed != null && RunMode.of(seed!) != mode) seed = null;
+                showTotalSets = selection.single == 'total-sets';
+                if (!showTotalSets) {
+                  mode = RunMode.values.firstWhere(
+                    (m) => m.prefix == selection.single,
+                  );
+                  if (seed != null && RunMode.of(seed!) != mode) seed = null;
+                }
                 refresh();
               },
             ),
-            Wrap(
-              spacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  seed ??
-                      (mode.timed
-                          ? 'Current seeds · most sets, top 100 runs'
-                          : 'Current seeds · fastest 100 runs'),
+            if (showTotalSets)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Total solved sets · top 100 players\n'
+                  'Counts uploaded solves from all modes, including Training, hints and replays. '
+                  'Solves in unfinished runs count. Linked devices share one total. '
+                  'Set a nickname to appear.',
+                  textAlign: TextAlign.center,
                 ),
-                TextButton(
-                  onPressed: chooseSeed,
-                  child: const Text('Choose seed'),
-                ),
-                if (seed != null)
-                  TextButton(
-                    onPressed: () {
-                      seed = null;
-                      refresh();
-                    },
-                    child: const Text('All seeds'),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    seed ??
+                        (mode.timed
+                            ? 'Current seeds · most sets, top 100 runs'
+                            : 'Current seeds · fastest 100 runs'),
                   ),
-              ],
-            ),
+                  TextButton(
+                    onPressed: chooseSeed,
+                    child: const Text('Choose seed'),
+                  ),
+                  if (seed != null)
+                    TextButton(
+                      onPressed: () {
+                        seed = null;
+                        refresh();
+                      },
+                      child: const Text('All seeds'),
+                    ),
+                ],
+              ),
             Expanded(
-              child: FutureBuilder<List<Score>>(
-                future: scores,
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          'Could not load scores. ${snapshot.error}',
-                          textAlign: TextAlign.center,
+              child: showTotalSets
+                  ? scoreList<SetTotalScore>(
+                      totals ??= api.totalSets(),
+                      (row, index) => ListTile(
+                        leading: Text('${index + 1}'),
+                        title: Text(row.name),
+                        trailing: Text(
+                          '${row.sets} ${row.sets == 1 ? 'set' : 'sets'}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 20,
+                          ),
                         ),
                       ),
-                    );
-                  }
-                  if (!snapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final rows = snapshot.data!;
-                  if (rows.isEmpty) {
-                    return const Center(
-                      child: Text('No scores yet. Set the first time!'),
-                    );
-                  }
-                  return ListView.builder(
-                    itemCount: rows.length,
-                    itemBuilder: (context, index) {
-                      final row = rows[index];
+                      emptyText:
+                          'No solved sets yet. Solve a set and sync to join!',
+                    )
+                  : scoreList<Score>(scores ??= load(), (row, index) {
                       final time = formatTime(
                         Duration(milliseconds: row.milliseconds),
                       );
@@ -296,10 +354,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
                         ),
                         onTap: () => seedActions(row.seed),
                       );
-                    },
-                  );
-                },
-              ),
+                    }, emptyText: 'No scores yet. Set the first time!'),
             ),
           ],
         ),

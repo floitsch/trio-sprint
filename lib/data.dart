@@ -42,6 +42,14 @@ class PlayerData {
 
   String get player => preferences.getString('player')!;
   String get nickname => preferences.getString('nickname') ?? '';
+  bool get nicknameNeedsSync =>
+      nickname.isNotEmpty &&
+      preferences.getString('synced-nickname') != nickname;
+  Future<void> acknowledgeNickname(String name) => _serialize(() async {
+    if (!await preferences.setString('synced-nickname', name)) {
+      throw StateError('Could not save nickname synchronization progress.');
+    }
+  });
   int? get best => preferences.getInt('best-s2');
   int? bestForSeed(String seed) =>
       preferences.getInt(seed.startsWith('s1-') ? 'best' : 'best-s2');
@@ -305,6 +313,14 @@ class Score {
   final int sets;
 }
 
+class SetTotalScore {
+  SetTotalScore.fromJson(Map<String, dynamic> json)
+    : name = json['name'] as String,
+      sets = json['sets'] as int;
+  final String name;
+  final int sets;
+}
+
 class ApiException implements Exception {
   const ApiException(this.status, this.message);
   final int status;
@@ -355,6 +371,13 @@ class OnlineApi {
     );
     return (response['scores'] as List)
         .map((e) => Score.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<SetTotalScore>> totalSets() async {
+    final response = await request('/scores/total-sets');
+    return (response['scores'] as List)
+        .map((e) => SetTotalScore.fromJson(e as Map<String, dynamic>))
         .toList();
   }
 

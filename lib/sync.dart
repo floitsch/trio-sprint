@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Toit contributors.
+// Copyright (C) 2026 Florian Loitsch.
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
@@ -89,7 +89,17 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
             }
             continue;
           }
-          if (player.pendingAttempts == 0) break;
+          if (player.pendingAttempts == 0) {
+            if (!player.nicknameNeedsSync) break;
+            final name = player.nickname;
+            await api.request(
+              '/players/name',
+              body: {'player': player.player, 'name': name},
+            );
+            probablyOffline = false;
+            await player.acknowledgeNickname(name);
+            continue;
+          }
           final batch = player.attemptBatch();
           final next = player.syncedHistory + batch.length;
           await api.request(

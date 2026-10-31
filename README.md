@@ -46,6 +46,13 @@ Leaving the app does not pause the stopwatch.
   **Only each player’s best** to hide additional runs from the same player ID.
   Tap a score to play its seed or copy its link. Set or change your nickname
   at the top of the high scores; a new name applies to future scores.
+  **Total sets** ranks the top 100 players by their uploaded solved-board history
+  across all modes, including Training, hinted solves, replays, and sets found in
+  unfinished runs. Each solve counts once; upload retries do not add to the total.
+  Linked devices share one total. Set a nickname to appear, even if you only
+  train; nickname changes also update the name on this leaderboard. Offline
+  solves count after syncing. History predating saved board attempts cannot be
+  recovered and does not count toward this total.
   Deployments preserve the D1 database and its existing scores.
   Nicknames and random player IDs are remembered on each device, without login.
   First-attempt personal bests also persist locally.
@@ -141,6 +148,7 @@ configured. Board uploads do not require a nickname; public scores do.
 Live leaderboards and multiplayer require the Cloudflare backend described below.
 New server deployments must apply migration `0005_attempts.sql` for board history
 uploads (the deployment workflow applies migrations automatically).
+Migration `0006_player_names.sql` adds nickname storage for Total sets.
 
 Trio Sprint is an unofficial fan project. It is not affiliated with, endorsed
 by, or sponsored by PlayMonster or Set Enterprises. SET® is a registered

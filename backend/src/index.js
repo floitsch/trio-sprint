@@ -1,6 +1,7 @@
-// Copyright (C) 2026 Toit contributors.
+// Copyright (C) 2026 Florian Loitsch.
 import { validHandicap, visibleBoard, delayBoard } from './handicap.js';
 import { validAttempts, saveAttempts } from './attempts.js';
+import { savePlayerName, totalSetsQuery } from './set_totals.js';
 import { DurableObject } from 'cloudflare:workers';
 import { SeededRun, seededBoards, validName, validPlayer, validSeed, validateScore } from './game.js';
 import { registerDevice, deviceCount, pairingCode, linkDevices, scoreQuery, insertScoreQuery, existingScoreQuery } from './players.js';
@@ -35,6 +36,17 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers });
     const url = new URL(request.url);
     try {
+      if (url.pathname === '/players/name' && request.method === 'POST') {
+        const body = await readJson(request);
+        if (!validPlayer(body?.player) || !validName(body?.name))
+          return json({ error: 'Invalid player or nickname' }, 400);
+        await savePlayerName(env.DB, body.player, body.name);
+        return json({ ok: true });
+      }
+      if (url.pathname === '/scores/total-sets' && request.method === 'GET') {
+        const { results } = await env.DB.prepare(totalSetsQuery).all();
+        return json({ scores: results });
+      }
       if (url.pathname === '/players/pairing' && request.method === 'POST') {
         const body = await readJson(request);
         if (!validPlayer(body?.player)) return json({ error: 'Invalid player' }, 400);

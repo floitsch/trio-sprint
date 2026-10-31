@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Toit contributors.
+// Copyright (C) 2026 Florian Loitsch.
 import 'package:flutter/material.dart';
 
 import 'leaderboard.dart';
@@ -44,9 +44,11 @@ class SyncScreen extends StatelessWidget {
               title: const Text('Board attempts waiting to upload'),
               trailing: Text('${player.pendingAttempts}'),
             ),
+            if (player.nicknameNeedsSync)
+              const ListTile(title: Text('Nickname update waiting to upload')),
             if (player.nickname.isEmpty) ...[
               const Text(
-                'Add a nickname to publish saved first-attempt scores. Your board history can sync without one.',
+                'Add a nickname to publish saved first-attempt scores and appear in Total sets. Your board history can sync without one.',
               ),
               TextButton(
                 onPressed: () async {
@@ -65,7 +67,9 @@ class SyncScreen extends StatelessWidget {
               )
             else if (sync.error != null)
               const Text('Uploads are waiting. Retrying automatically.'),
-            if (player.pendingScores == 0 && player.pendingAttempts == 0)
+            if (player.pendingScores == 0 &&
+                player.pendingAttempts == 0 &&
+                !player.nicknameNeedsSync)
               const Text('Nothing waiting to upload.'),
             if (sync.busy) const Text('Syncing…'),
             for (final score in player.savedScores.where(

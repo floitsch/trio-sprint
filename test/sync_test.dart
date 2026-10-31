@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Toit contributors.
+// Copyright (C) 2026 Florian Loitsch.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -15,6 +15,7 @@ class FakeApi extends OnlineApi {
   bool loseResponse = false;
   final uploadedScores = <String, Map<String, dynamic>>{};
   final attempts = <String, Map<String, dynamic>>{};
+  final names = <String, String>{};
   final rejected = <String>{};
   final calls = <String>[];
   Completer<void>? gate;
@@ -44,6 +45,8 @@ class FakeApi extends OnlineApi {
           () => attempt as Map<String, dynamic>,
         );
       }
+    } else if (path == '/players/name') {
+      names[body!['player'] as String] = body['name'] as String;
     } else {
       throw StateError('Unexpected request: $path');
     }
@@ -134,6 +137,41 @@ void main() {
     expect(restored.pendingScores, 0);
     expect(restored.pendingAttempts, 0);
     second.dispose();
+  });
+
+  test('training-only players sync nicknames offline and rename without uploading history again', () async {
+    final player = await PlayerData.load();
+    final cards = SetGame(seed: 's2-1234abcd').board;
+    await player.recordPractice(
+      PracticeBoard(
+        cards: cards.map((c) => c.id).toList(),
+        source: 'training',
+        solutionCards: findSet(cards)!.map((c) => c.id).toList(),
+      ),
+    );
+    final api = FakeApi();
+    final sync = SyncService(player, api: api);
+    await sync.sync();
+    expect(api.names, isEmpty);
+    expect(player.pendingAttempts, 0);
+    await player.setNickname('Training player');
+    api.offline = true;
+    await sync.sync();
+    expect(player.nicknameNeedsSync, isTrue);
+    sync.dispose();
+    final restored = await PlayerData.load();
+    final resumed = SyncService(restored, api: api);
+    api.offline = false;
+    await resumed.sync();
+    expect(api.names[restored.player], 'Training player');
+    expect(api.uploadedScores, isEmpty);
+    expect(restored.nicknameNeedsSync, isFalse);
+    final attempts = api.calls.where((path) => path == '/attempts').length;
+    await restored.setNickname('New name');
+    await resumed.sync();
+    expect(api.names[restored.player], 'New name');
+    expect(api.calls.where((path) => path == '/attempts'), hasLength(attempts));
+    resumed.dispose();
   });
 
   test('unnamed scores wait while board history syncs; conflicts do not block later runs', () async {
