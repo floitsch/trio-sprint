@@ -69,8 +69,8 @@ Leaving the app does not pause the stopwatch.
   remain device-specific; linking does not import another device’s board history.
   This uses the same honor system as scores and does not require a login.
 - **First attempts only:** starting a seed consumes its eligibility, including
-  abandoned runs and countdown restarts. Replays are practice. Browser Web Locks
-  serialize claims across tabs, and local storage remembers them across visits.
+  abandoned runs and countdown restarts. Replays are practice. Browser IndexedDB
+  transactions serialize claims across tabs and remember them across visits.
   Android uses persistent preferences. Storage failures make runs practice-only.
   Runs of freshly generated seeds are first attempts by construction. For any
   other seed (typed, linked or from the high scores) that this device has not
@@ -144,6 +144,12 @@ uploads. Offline & sync shows pending counts, a possible offline indication and 
 scores; a rejected score stays saved locally and does not block later runs.
 Unconfigured development builds retain all records locally until a server is
 configured. Board uploads do not require a nickname; public scores do.
+
+Browser saves use IndexedDB, so growing history no longer fills the small
+`localStorage` quota and prevents new first attempts. Existing local saves,
+player identity, seed claims and upload progress migrate automatically on
+startup. Old copies are removed only after the migration commits. Keep site
+data intact when updating; clearing it deletes the device identity and history.
 
 Live leaderboards and multiplayer require the Cloudflare backend described below.
 New server deployments must apply migration `0005_attempts.sql` for board history
@@ -284,6 +290,8 @@ use a disposable local database):
 ```sh
 cd backend
 npm test
+# Browser storage migration and concurrent-claim regression tests (Chrome):
+npm run test:browser
 # With npm run dev running in another terminal:
 npm run test:integration
 ```

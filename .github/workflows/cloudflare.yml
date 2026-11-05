@@ -35,6 +35,8 @@ jobs:
         working-directory: backend
       - run: npm test
         working-directory: backend
+      - run: npm run test:browser
+        working-directory: backend
       - name: Deploy app and API
         working-directory: backend
         env:

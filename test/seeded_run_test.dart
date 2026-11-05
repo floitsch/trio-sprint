@@ -4,13 +4,72 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 import 'package:trio_sprint/card_view.dart';
 import 'package:trio_sprint/data.dart';
 import 'package:trio_sprint/game.dart';
 import 'package:trio_sprint/main.dart';
 
+class FailingAttemptStore extends InMemorySharedPreferencesStore {
+  FailingAttemptStore() : super.withData({'flutter.player': 'test-player'});
+
+  bool fail = true;
+
+  @override
+  Future<bool> setValue(String valueType, String key, Object value) async {
+    if (fail && key.startsWith('flutter.attempt:')) return false;
+    return super.setValue(valueType, key, value);
+  }
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets(
+    'failed attempt storage is not labeled a replay and can recover',
+    (tester) async {
+      final store = FailingAttemptStore();
+      SharedPreferencesStorePlatform.instance = store;
+      await tester.pumpWidget(const TrioSprintApp());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Start run'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 2));
+      expect(
+        find.textContaining('Practice only · storage unavailable'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Practice replay'), findsNothing);
+      for (var round = 0; round < 5; round++) {
+        final cards = tester
+            .widgetList<CardView>(find.byType(CardView))
+            .map((v) => v.card)
+            .toList();
+        for (final card in findSet(cards)!) {
+          await tester.tap(find.byKey(ValueKey('card-${card.id}')));
+          await tester.pump();
+        }
+      }
+      expect(
+        find.text(
+          'Practice only. Device storage is unavailable, so this run cannot enter the leaderboard.',
+        ),
+        findsOneWidget,
+      );
+      final player = await PlayerData.load();
+      expect(player.savedScores, isEmpty);
+      store.fail = false;
+      await tester.pump(const Duration(seconds: 2));
+      await tester.ensureVisible(find.text('Replay seed (practice)'));
+      await tester.tap(find.text('Replay seed (practice)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('First time'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.textContaining('First attempt · '), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   test('s2 entire runs match server fixtures and ignore tap order', () {
     final fixtures =

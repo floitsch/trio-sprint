@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'game.dart';
 import 'practice.dart';
 import 'run_history.dart';
+import 'storage_stub.dart' if (dart.library.js_interop) 'storage_web.dart';
 
 import 'attempt_stub.dart'
     if (dart.library.js_interop) 'attempt_web.dart'
@@ -31,6 +32,7 @@ class PlayerData {
   PlayerData(this.preferences);
   final SharedPreferences preferences;
   static Future<PlayerData> load() async {
+    configureStorage();
     final data = PlayerData(await SharedPreferences.getInstance());
     if (data.preferences.getString('player') == null) {
       if (!await data.preferences.setString('player', randomId())) {

@@ -6,7 +6,11 @@
     "dev": "wrangler dev --port 8787",
     "deploy": "wrangler deploy",
     "test": "node --test test/*.test.js",
+    "test:browser": "node --test test/storage.browser.js",
     "test:integration": "node --test test/*.integration.js"
   },
-  "devDependencies": { "wrangler": "^4.0.0" }
+  "devDependencies": {
+    "playwright-core": "^1.65.0",
+    "wrangler": "^4.0.0"
+  }
 }

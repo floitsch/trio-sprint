@@ -4,7 +4,10 @@ Future<bool> claimSeed(SharedPreferences preferences, String seed) async {
   await preferences.reload();
   final key = 'attempt:$seed';
   if (preferences.containsKey(key)) return false;
-  return preferences.setBool(key, true);
+  if (!await preferences.setBool(key, true)) {
+    throw StateError('Could not save seed attempt.');
+  }
+  return true;
 }
 
 Future<bool> hasAttempted(SharedPreferences preferences, String seed) async {

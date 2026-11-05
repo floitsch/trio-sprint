@@ -71,6 +71,7 @@ class _GameScreenState extends State<GameScreen> {
   bool starting = false;
   int runGeneration = 0;
   bool eligible = false;
+  bool attemptStorageFailed = false;
   SyncService? syncService;
   Map<String, dynamic>? get currentSavedScore =>
       player?.savedScore(game.seed ?? '');
@@ -384,11 +385,14 @@ class _GameScreenState extends State<GameScreen> {
     }
     pendingSeed = null;
     var firstAttempt = false;
+    attemptStorageFailed = player == null;
     try {
       // Claim even when not first: the seed is now attempted on this device.
       final claimed = await player?.claimSeed(chosenSeed) ?? false;
       firstAttempt = claimed && firstTime;
-    } catch (_) {
+    } catch (error, stack) {
+      attemptStorageFailed = true;
+      debugPrint('Could not save seed attempt: $error\n$stack');
       if (mounted) {
         message('Could not remember this attempt. This run is practice only.');
       }
@@ -1044,6 +1048,8 @@ class _GameScreenState extends State<GameScreen> {
           child: Text(
             eligible
                 ? 'First attempt · ${game.seed}'
+                : attemptStorageFailed
+                ? 'Practice only · storage unavailable · ${game.seed}'
                 : 'Practice replay · ${game.seed}',
             style: const TextStyle(fontSize: 11, color: Color(0xFF68717B)),
           ),
@@ -1211,7 +1217,9 @@ class _GameScreenState extends State<GameScreen> {
       padding: const EdgeInsets.all(8),
       child: Text(
         !eligible
-            ? 'Practice replay. Only your first attempt can enter the leaderboard.'
+            ? attemptStorageFailed
+                  ? 'Practice only. Device storage is unavailable, so this run cannot enter the leaderboard.'
+                  : 'Practice replay. Only your first attempt can enter the leaderboard.'
             : !canSubmit
             ? 'Find at least one set to enter the high scores.'
             : submitted

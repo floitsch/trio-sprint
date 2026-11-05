@@ -45,20 +45,6 @@ window.trioOnUpdate = listener => {
 };
 window.trioReload = () => location.reload();
 
-// Web Locks serializes claims across tabs. If storage/locking is unavailable,
-// fail closed: solo play still works, but the run is not leaderboard eligible.
-window.trioClaimSeed = async seed => {
-  if (!navigator.locks) return false;
-  return navigator.locks.request('trio-seed-attempt', () => {
-    const key = 'trio-attempt:' + seed;
-    if (localStorage.getItem(key) !== null) return false;
-    localStorage.setItem(key, 'started');
-    return true;
-  });
-};
-window.trioSeedAttempted = seed =>
-  localStorage.getItem('trio-attempt:' + seed) !== null;
-
 // Hints only: a browser can report online behind a captive portal. The outbox
 // retains data until the server acknowledges it, regardless of this signal.
 let onlineListener;
