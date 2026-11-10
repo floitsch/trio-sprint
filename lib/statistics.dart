@@ -315,14 +315,27 @@ class BoardReviewScreen extends StatefulWidget {
 
 class _BoardReviewScreenState extends State<BoardReviewScreen> {
   bool reveal = false;
+  int solutionIndex = 0;
+  late final solutions = widget.board.solutions
+      .map((trio) => trio.map((card) => card.id).toSet())
+      .toList();
   final selected = <int>{};
   String feedback = '';
+
+  @override
+  void initState() {
+    super.initState();
+    final actual = widget.board.solutionCards.toSet();
+    final index = solutions.indexWhere(
+      (trio) => actual.length == trio.length && trio.containsAll(actual),
+    );
+    if (index >= 0) solutionIndex = index;
+  }
+
   @override
   Widget build(BuildContext context) {
     final board = widget.board;
-    final solution = board.solutionCards.isEmpty
-        ? board.solution!.map((c) => c.id).toSet()
-        : board.solutionCards.toSet();
+    final solution = solutions[solutionIndex];
     return Scaffold(
       appBar: AppBar(title: Text(widget.title)),
       body: SafeArea(
@@ -363,6 +376,29 @@ class _BoardReviewScreenState extends State<BoardReviewScreen> {
               ),
             ),
             Text(feedback),
+            if (reveal) ...[
+              Text('Solution ${solutionIndex + 1} of ${solutions.length}'),
+              if (solutions.length > 1)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      tooltip: 'Previous solution',
+                      onPressed: () => setState(() {
+                        solutionIndex = (solutionIndex - 1) % solutions.length;
+                      }),
+                      icon: const Icon(Icons.chevron_left),
+                    ),
+                    IconButton(
+                      tooltip: 'Next solution',
+                      onPressed: () => setState(() {
+                        solutionIndex = (solutionIndex + 1) % solutions.length;
+                      }),
+                      icon: const Icon(Icons.chevron_right),
+                    ),
+                  ],
+                ),
+            ],
             TextButton(
               onPressed: () => setState(() => reveal = !reveal),
               child: Text(reveal ? 'Hide solution' : 'Show solution'),

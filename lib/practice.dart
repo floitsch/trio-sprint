@@ -61,24 +61,26 @@ class PracticeBoard {
       isSet(trio) &&
       (differences == null || differentAttributes(trio) == differences);
 
-  List<SetCard>? get solution {
+  List<SetCard>? get solution => solutions.firstOrNull;
+
+  /// Every valid trio, once each, respecting this exercise’s constraints.
+  Iterable<List<SetCard>> get solutions sync* {
     final board = cards.map(SetCard.new).toList();
     if (anchors.isNotEmpty) {
       for (final card in board) {
         final trio = [...anchors.map(SetCard.new), card];
-        if (accepts(trio)) return trio;
+        if (accepts(trio)) yield trio;
       }
     } else {
       for (var a = 0; a < board.length - 2; a++) {
         for (var b = a + 1; b < board.length - 1; b++) {
           for (var c = b + 1; c < board.length; c++) {
             final trio = [board[a], board[b], board[c]];
-            if (accepts(trio)) return trio;
+            if (accepts(trio)) yield trio;
           }
         }
       }
     }
-    return null;
   }
 
   PracticeBoard result(

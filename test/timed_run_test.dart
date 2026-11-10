@@ -8,6 +8,7 @@ import 'package:trio_sprint/card_view.dart';
 import 'package:trio_sprint/data.dart';
 import 'package:trio_sprint/game.dart';
 import 'package:trio_sprint/main.dart';
+import 'package:trio_sprint/run_timeline.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -110,6 +111,13 @@ void main() {
     expect(find.text('Time’s up.'), findsOneWidget);
     expect(find.byKey(const ValueKey('result-time')), findsOneWidget);
     expect(find.text('SETS IN ONE MINUTE'), findsOneWidget);
+    final timeline = tester.widget<RunTimeline>(find.byType(RunTimeline));
+    expect(timeline.setTimes, hasLength(6));
+    expect(
+      timeline.setTimes.fold(Duration.zero, (a, b) => a + b) +
+          timeline.unfinished!,
+      const Duration(minutes: 1),
+    );
     expect(find.text('Your best run.'), findsOneWidget);
     expect(find.byTooltip('How to play').hitTestable(), findsNothing);
     await tester.pump(const Duration(milliseconds: 999));

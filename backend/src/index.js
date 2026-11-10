@@ -140,7 +140,7 @@ export class RaceRoom extends DurableObject {
     if (new URL(request.url).pathname === '/create') {
       if (this.game) return json({ error: 'Room already exists' }, 409);
       const seed = 's2-' + crypto.getRandomValues(new Uint32Array(1))[0].toString(16).padStart(8, '0');
-      this.game = { seed, players: [], startAt: null, winner: null, ended: false, expires: Date.now() + 3600000 };
+      this.game = { seed, mode: 'shared', solutions: [], players: [], startAt: null, winner: null, ended: false, expires: Date.now() + 3600000 };
       await this.save();
       await this.ctx.storage.setAlarm(this.game.expires);
       return json({ ok: true });
@@ -166,7 +166,12 @@ export class RaceRoom extends DurableObject {
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
   runFor(player) {
-    const run = new SeededRun(this.game.seed);
+    const shared = this.game.mode === 'shared';
+    const run = new SeededRun(this.game.seed, shared ? {target: Infinity} : {});
+    if (shared) {
+      for (const solution of this.game.solutions) run.pick(solution);
+      return run;
+    }
     // Rooms already in progress at deployment retain their original boards.
     if (this.game.seed.startsWith('s1-')) {
       run.progress = player.progress;
@@ -181,6 +186,8 @@ export class RaceRoom extends DurableObject {
     const own = game.players.find(p => p.token === token);
     const started = game.startAt && Date.now() >= game.startAt;
     return { type: 'state', now: Date.now(), startAt: game.startAt, ended: game.ended,
+      mode: game.mode ?? 'race',
+      round: game.mode === 'shared' ? game.solutions.length : own?.progress ?? 0,
       winner: game.winner, you: game.players.indexOf(own),
       seed: game.ended ? game.seed : null,
       revealAt: own?.revealAt ?? null,
@@ -226,11 +233,18 @@ export class RaceRoom extends DurableObject {
       }
     } else if (data.type === 'pick' && this.game.startAt && Date.now() >= this.game.startAt) {
       if (Date.now() < (player.revealAt ?? 0)) return;
-      if (data.round !== player.progress) { this.broadcast(); return; }
+      const shared = this.game.mode === 'shared';
+      const round = shared ? this.game.solutions.length : player.progress;
+      if (data.round !== round) { this.broadcast(); return; }
       const run = this.runFor(player);
       const before = [...run.board];
       if (run.pick(data.cards)) {
-        delayBoard(player, before, run.board, Date.now());
+        if (shared) {
+          this.game.solutions.push(data.cards);
+          for (const p of this.game.players) delayBoard(p, before, run.board, Date.now());
+        } else {
+          delayBoard(player, before, run.board, Date.now());
+        }
         (player.solutions ??= []).push(data.cards);
         player.progress++;
         if (player.progress === 5) {

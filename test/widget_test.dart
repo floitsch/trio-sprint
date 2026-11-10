@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trio_sprint/card_view.dart';
 import 'package:trio_sprint/game.dart';
 import 'package:trio_sprint/main.dart';
+import 'package:trio_sprint/run_timeline.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -197,6 +198,25 @@ void main() {
     final result = tester
         .widget<Text>(find.byKey(const ValueKey('result-time')))
         .data;
+    final timeline = tester.widget<RunTimeline>(find.byType(RunTimeline));
+    expect(timeline.setTimes, hasLength(5));
+    expect(timeline.unfinished, isNull);
+    expect(
+      formatTime(timeline.setTimes.fold(Duration.zero, (a, b) => a + b)),
+      result,
+    );
+    await tester.ensureVisible(find.byKey(const ValueKey('run-timeline')));
+    await tester.tap(find.byKey(const ValueKey('run-timeline')));
+    await tester.pumpAndSettle();
+    expect(find.text('Set times'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Set 5'),
+      100,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.text('Set 5'), findsOneWidget);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 3));
     expect(
       tester.widget<Text>(find.byKey(const ValueKey('result-time'))).data,

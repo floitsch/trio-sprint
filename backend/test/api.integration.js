@@ -95,7 +95,7 @@ class Client {
   close() { this.ws.close(); }
 }
 
-test('two-player race: countdown, identical boards, validation, reconnect and winner', async () => {
+test('shared game: countdown, shared replacements, validation, reconnect and winner', async () => {
   const {room} = await (await post('/rooms', {})).json();
   const id = player();
   const first = new Client(room, id, 'Alice');
@@ -124,7 +124,9 @@ test('two-player race: countdown, identical boards, validation, reconnect and wi
     for (let i = 0; i < 12; i++) {
       if (!solution.includes(starting[i])) assert.equal(nextBoard[i], starting[i]);
     }
-    assert.deepEqual(second.state.board, starting);
+    await second.wait(s => s.round === 1);
+    assert.deepEqual(second.state.board, nextBoard);
+    assert.equal(second.state.players[second.state.you].progress, 0);
     first.close();
     await second.wait(s => s.players.some(p => p.name === 'Alice' && !p.connected));
     reconnect = new Client(room, id, 'Alice');
@@ -202,6 +204,17 @@ test('handicap withholds opening and replacement cards, rejects early picks and 
     for (let i = 0; i < masked.length; i++) {
       if (masked[i] !== null) assert.equal(reconnect.state.board[i], masked[i]);
     }
+    // An opponent's claim also masks the delayed player's replacement cards.
+    await second.wait(s => s.round === 1);
+    second.send({type: 'pick', round: 1, cards: findSet(second.state.board)});
+    await reconnect.wait(s => s.round === 2 && s.board.includes(null));
+    await second.wait(s => s.round === 2);
+    assert.equal(reconnect.state.players[reconnect.state.you].progress, 1);
+    assert.equal(second.state.players[second.state.you].progress, 1);
+    assert.equal(reconnect.state.board.filter(c => c === null).length, 3);
+    reconnect.send({type: 'pick', round: 2, cards: findSet(second.state.board)});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(reconnect.state.round, 2);
     reconnect.send({type: 'leave'});
     await second.wait(s => s.ended);
   } finally { first.close(); second.close(); reconnect?.close(); }
@@ -222,4 +235,73 @@ test('offline board history accepts idempotent batches independently of scores a
   assert.equal((await post('/attempts', body)).status, 200);
   body.attempts[0].board.cards = [99];
   assert.equal((await post('/attempts', body)).status, 400);
+});
+
+
+test('shared claims use a global round, award one player, and continue beyond five rounds', async () => {
+  const {room} = await (await post('/rooms', {})).json();
+  const first = new Client(room, player(), 'Alice');
+  const second = new Client(room, player(), 'Bob');
+  try {
+    await first.wait(s => s.players.length === 2);
+    await second.wait(s => s.players.length === 2);
+    assert.equal(first.state.mode, 'shared');
+    first.send({type: 'ready'});
+    second.send({type: 'ready'});
+    await first.wait(s => s.board.length === 12);
+    await second.wait(s => s.board.length === 12);
+    for (let round = 0; round < 9; round++) {
+      const winner = round % 2 === 0 ? second : first;
+      const loser = winner === first ? second : first;
+      const before = [...winner.state.board];
+      const solution = findSet(before);
+      const loserProgress = loser.state.players[loser.state.you].progress;
+      winner.send({type: 'pick', round, cards: solution});
+      await winner.wait(s => s.round === round + 1);
+      await loser.wait(s => s.round === round + 1);
+      const progress = winner.state.players[winner.state.you].progress;
+      // Even a valid set from the new board cannot be claimed with the old round.
+      loser.send({type: 'pick', round, cards: findSet(loser.state.board) ?? solution});
+      await new Promise(resolve => setTimeout(resolve, 60));
+      assert.equal(loser.state.players[loser.state.you].progress, loserProgress);
+      assert.equal(winner.state.players[winner.state.you].progress, progress);
+      assert.deepEqual(first.state.board, second.state.board);
+      if (round < 8) {
+        assert.equal(winner.state.ended, false);
+        assert.ok(findSet(winner.state.board));
+        for (let i = 0; i < 12; i++) {
+          if (!solution.includes(before[i])) assert.equal(winner.state.board[i], before[i]);
+        }
+      }
+    }
+    assert.equal(first.state.ended, true);
+    assert.deepEqual(first.state.players.map(p => p.progress), [4, 5]);
+    assert.equal(second.state.winner, second.state.you);
+  } finally { first.close(); second.close(); }
+});
+
+
+test('simultaneous valid claims award exactly one point and one replacement', async () => {
+  const {room} = await (await post('/rooms', {})).json();
+  const first = new Client(room, player(), 'Alice');
+  const second = new Client(room, player(), 'Bob');
+  try {
+    await first.wait(s => s.players.length === 2);
+    await second.wait(s => s.players.length === 2);
+    first.send({type: 'ready'});
+    second.send({type: 'ready'});
+    await first.wait(s => s.board.length === 12);
+    await second.wait(s => s.board.length === 12);
+    const before = [...first.state.board];
+    const cards = findSet(before);
+    first.send({type: 'pick', round: 0, cards});
+    second.send({type: 'pick', round: 0, cards});
+    await first.wait(s => s.round === 1);
+    await second.wait(s => s.round === 1);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(first.state.players.reduce((sum, p) => sum + p.progress, 0), 1);
+    assert.equal(first.state.players.reduce((sum, p) => sum + p.mistakes, 0), 0);
+    assert.deepEqual(first.state.board, second.state.board);
+    assert.equal(first.state.board.filter((card, i) => card !== before[i]).length, 3);
+  } finally { first.close(); second.close(); }
 });

@@ -144,12 +144,20 @@ class _RaceScreenState extends State<RaceScreen> {
                 widget.player.claimSeed(seed).catchError((_) => false);
               }
               final oldProgress = ownProgress;
+              final oldRound = boardRound;
               final nextYou = message['you'] as int? ?? -1;
               final nextPlayers = message['players'] as List<dynamic>;
               final nextProgress = nextYou < 0
                   ? 0
                   : nextPlayers[nextYou]['progress'] as int;
-              if (nextProgress > oldProgress) rememberBoard();
+              final nextRound = message['round'] as int? ?? nextProgress;
+              if (nextProgress > oldProgress) {
+                rememberBoard();
+                feedback = 'You claimed a set!';
+              } else if (nextRound != oldRound) {
+                rememberBoard(outcome: AttemptOutcome.interrupted);
+                feedback = 'Your friend claimed a set. Find the next one!';
+              }
               if (message['ended'] == true) {
                 rememberBoard(outcome: AttemptOutcome.interrupted);
                 boardClock.stop();
@@ -159,7 +167,8 @@ class _RaceScreenState extends State<RaceScreen> {
                   (message['now'] as int) -
                   DateTime.now().millisecondsSinceEpoch;
               syncPracticeClock();
-              if (oldProgress != ownProgress ||
+              if (oldRound != boardRound ||
+                  oldProgress != ownProgress ||
                   waiting ||
                   message['ended'] == true) {
                 selected.clear();
@@ -214,6 +223,7 @@ class _RaceScreenState extends State<RaceScreen> {
   int get you => state?['you'] as int? ?? -1;
   int get ownProgress =>
       you >= 0 && you < players.length ? players[you]['progress'] as int : 0;
+  int get boardRound => state?['round'] as int? ?? ownProgress;
   void send(Map<String, dynamic> message) {
     if (connected) channel?.sink.add(jsonEncode(message));
   }
@@ -233,11 +243,7 @@ class _RaceScreenState extends State<RaceScreen> {
         waiting = true;
         feedback = '';
         pendingSolution = selected.toList();
-        send({
-          'type': 'pick',
-          'round': ownProgress,
-          'cards': selected.toList(),
-        });
+        send({'type': 'pick', 'round': boardRound, 'cards': selected.toList()});
       }
     });
   }
@@ -334,8 +340,10 @@ class _RaceScreenState extends State<RaceScreen> {
             child: ListView(
               padding: const EdgeInsets.all(20),
               children: [
-                const Text(
-                  'Same seeded deck. First to five sets wins. Leaving a started race forfeits it.',
+                Text(
+                  state?['mode'] == 'race'
+                      ? 'Same seeded deck. First to five sets wins. Leaving a started race forfeits it.'
+                      : 'Shared board. Claim a set to earn a point and replace its cards for both players. First to five wins. Leaving forfeits the game.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),

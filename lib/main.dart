@@ -18,6 +18,7 @@ import 'install.dart';
 import 'update.dart';
 import 'practice.dart';
 import 'run_history.dart';
+import 'run_timeline.dart';
 
 void main() => runApp(const TrioSprintApp());
 
@@ -82,6 +83,7 @@ class _GameScreenState extends State<GameScreen> {
 
   bool submitting = false;
   final solutions = <List<int>>[];
+  final setTimes = <Duration>[];
   final boardClock = BoardClock();
   int boardMistakes = 0;
   RunMode mode = RunMode.sprint;
@@ -401,6 +403,7 @@ class _GameScreenState extends State<GameScreen> {
     starting = false;
     eligible = firstAttempt;
     solutions.clear();
+    setTimes.clear();
     lastSet = Duration.zero;
     stopClocks();
     watch.reset();
@@ -515,6 +518,10 @@ class _GameScreenState extends State<GameScreen> {
       }
       final result = game.pick(card.id);
       if (result == PickResult.correct || result == PickResult.finished) {
+        if (result == PickResult.finished) stopClocks();
+        final completedAt = watch.elapsed;
+        setTimes.add(completedAt - lastSet);
+        lastSet = completedAt;
         solutions.add(attempt);
       }
       switch (result) {
@@ -525,13 +532,11 @@ class _GameScreenState extends State<GameScreen> {
         case PickResult.correct:
           boardMistakes = 0;
           boardClock.start();
-          lastSet = watch.elapsed;
           feedback = game.mode.timed
               ? '${game.streak} found. Keep going!'
               : '${game.streak} down. ${5 - game.streak} to go.';
           HapticFeedback.selectionClick();
         case PickResult.finished:
-          stopClocks();
           rememberRun(completed: true);
           newBest = eligible && (best == null || watch.elapsed < best!);
           if (newBest) best = watch.elapsed;
@@ -1193,6 +1198,13 @@ class _GameScreenState extends State<GameScreen> {
           ? 'Clean run. Every set counted.'
           : '${game.mistakes} ${game.mistakes == 1 ? 'mistake' : 'mistakes'}. You got there.',
       style: const TextStyle(color: Color(0xFF68717B)),
+    ),
+    const SizedBox(height: 16),
+    resultControl(
+      RunTimeline(
+        setTimes: setTimes,
+        unfinished: game.mode.timed ? game.mode.limit! - lastSet : null,
+      ),
     ),
     const SizedBox(height: 16),
     if (game.mode.timed)

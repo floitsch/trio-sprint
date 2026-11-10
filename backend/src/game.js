@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Toit contributors.
+// Copyright (C) 2026 Florian Loitsch.
 export function isSet(cards) {
   return Array.isArray(cards) && cards.length === 3 && new Set(cards).size === 3 &&
     cards.every(c => Number.isInteger(c) && c >= 0 && c < 81) &&
@@ -60,10 +60,11 @@ export function validateScore(body) {
 // independent of the order in which the player clicked them. Keep in sync with
 // SetGame in lib/game.dart; changes to these rules require a new seed version.
 export class SeededRun {
-  constructor(seed) {
+  // Shared multiplayer boards continue until a player, rather than the deck, reaches five.
+  constructor(seed, {target} = {}) {
     if (!validSeed(seed)) throw new Error('Invalid seed');
     this.progress = 0;
-    this.target = timeLimit(seed) ? Infinity : 5;
+    this.target = target ?? (timeLimit(seed) ? Infinity : 5);
     this.state = seedState(seed);
     if (seed.startsWith('s1-')) {
       this.rounds = seededBoards(seed);

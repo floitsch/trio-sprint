@@ -19,10 +19,13 @@ Leaving the app does not pause the stopwatch.
 
 - **Timed runs:** choose **1 min** or **3 min** on the start screen to find as
   many sets as you can before time runs out. Boards keep evolving the same way.
-  Results appear immediately; buttons appear after one second to prevent
+  Results include a colored time bar. Tap it for each set’s solving time and
+  the time spent on the final unsolved board. Results appear immediately;
+  buttons appear after one second to prevent
   accidental taps while finishing a set.
   After timeout, **Review last unsolved board** opens the exact last layout,
-  with the solution hidden until you choose to reveal it. You can try solving
+  with solutions hidden until you choose to reveal them. Use the arrows to
+  browse every valid set; the counter shows how many solutions the board has. You can try solving
   it without changing scores or statistics.
   More sets rank higher; ties go to the earlier last set. Runs without a set
   cannot be submitted. Timed seeds start with `1m-` or `3m-`, so each seed
@@ -113,8 +116,11 @@ Leaving the app does not pause the stopwatch.
   Statistics remain available locally and board history also uploads when online.
   Linking devices does not combine their displayed statistics.
 - **1 vs 1:** share a room link/code, ready up, and race to find five sets
-  from the same starting board and seeded deck. Each player keeps their own
-  evolving board; reconnecting on the same device restores their exact choices.
+  on a shared board and seeded deck. The first valid claim earns that player
+  one point and replaces the three cards for both players. Claims from an older
+  board are ignored, so simultaneous claims cannot score twice. Reconnecting
+  on the same device restores the current board and score. Rooms already open
+  before this change retain their original independent-board rules.
   Before readying, each player can set their own **card delay** in 0.1-second
   steps (0–30 seconds). It applies to the opening deal and each new replacement;
   unchanged cards stay visible, and selections resume when the full board is
