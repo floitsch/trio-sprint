@@ -652,11 +652,15 @@ class _GameScreenState extends State<GameScreen> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 760),
             child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: inRun ? 12 : 22),
+              padding: EdgeInsets.symmetric(
+                horizontal: phase == Phase.ready ? 22 : 12,
+              ),
               child: Column(
                 children: [
                   Padding(
-                    padding: EdgeInsets.symmetric(vertical: inRun ? 2 : 12),
+                    padding: EdgeInsets.symmetric(
+                      vertical: phase == Phase.ready ? 12 : 2,
+                    ),
                     child: Row(
                       children: [
                         Expanded(
@@ -669,7 +673,7 @@ class _GameScreenState extends State<GameScreen> {
                                 Text(
                                   'trio',
                                   style: TextStyle(
-                                    fontSize: inRun ? 24 : 38,
+                                    fontSize: phase == Phase.ready ? 38 : 24,
                                     fontWeight: FontWeight.w900,
                                     letterSpacing: -2,
                                   ),
@@ -677,7 +681,7 @@ class _GameScreenState extends State<GameScreen> {
                                 Text(
                                   '.',
                                   style: TextStyle(
-                                    fontSize: inRun ? 24 : 38,
+                                    fontSize: phase == Phase.ready ? 38 : 24,
                                     fontWeight: FontWeight.w900,
                                     color: accent,
                                   ),
@@ -695,8 +699,7 @@ class _GameScreenState extends State<GameScreen> {
                             ),
                           ),
                         ),
-                        if (phase == Phase.playing ||
-                            phase == Phase.countdown) ...[
+                        if (inRun) ...[
                           TextButton(
                             onPressed: abandon,
                             child: const Text('Abandon'),
@@ -1123,35 +1126,73 @@ class _GameScreenState extends State<GameScreen> {
     child: child,
   );
 
-  Widget results() => centeredPage([
-    Container(
-      padding: const EdgeInsets.all(18),
-      decoration: const BoxDecoration(
-        color: Color(0xFFE3ECDD),
-        shape: BoxShape.circle,
+  Widget results() => Column(
+    children: [
+      Expanded(child: centeredPage(resultDetails())),
+      const SizedBox(height: 4),
+      resultControl(
+        Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          children: [
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(132, 48),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                textStyle: Theme.of(context).textTheme.labelLarge
+                    ?.copyWith(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              onPressed: submitting ? null : start,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Play again'),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              onPressed: submitting
+                  ? null
+                  : () => setState(() => phase = Phase.ready),
+              child: const Text('Back to start'),
+            ),
+          ],
+        ),
       ),
-      child: Icon(
-        game.mode.timed ? Icons.timer_outlined : Icons.check_rounded,
-        size: 38,
-        color: const Color(0xFF377548),
+      const SizedBox(height: 8),
+    ],
+  );
+
+  List<Widget> resultDetails() => [
+    FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Row(
+        children: [
+          Icon(
+            game.mode.timed ? Icons.timer_outlined : Icons.check_rounded,
+            size: 26,
+            color: const Color(0xFF377548),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            game.mode.timed ? 'Time’s up.' : 'Five in a row.',
+            style: const TextStyle(
+              fontSize: 28,
+              height: 1.2,
+              letterSpacing: -1,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
       ),
     ),
-    const SizedBox(height: 24),
-    Text(
-      game.mode.timed ? 'Time’s up.' : 'Five in a row.',
-      style: const TextStyle(
-        fontSize: 38,
-        letterSpacing: -1.5,
-        fontWeight: FontWeight.w800,
-      ),
-    ),
-    const SizedBox(height: 12),
     FittedBox(
       child: Text(
         game.mode.timed ? '${game.streak}' : formatTime(watch.elapsed),
         key: const ValueKey('result-time'),
         style: const TextStyle(
-          fontSize: 78,
+          fontSize: 56,
+          height: 1.1,
           letterSpacing: -3,
           fontWeight: FontWeight.w700,
           fontFeatures: [FontFeature.tabularFigures()],
@@ -1168,7 +1209,7 @@ class _GameScreenState extends State<GameScreen> {
         fontWeight: FontWeight.w700,
       ),
     ),
-    const SizedBox(height: 24),
+    const SizedBox(height: 4),
     Text(
       !eligible
           ? 'Practice run'
@@ -1185,7 +1226,7 @@ class _GameScreenState extends State<GameScreen> {
         fontWeight: FontWeight.w600,
       ),
     ),
-    const SizedBox(height: 8),
+    const SizedBox(height: 4),
     Text(
       game.mode.timed
           ? [
@@ -1199,34 +1240,17 @@ class _GameScreenState extends State<GameScreen> {
           : '${game.mistakes} ${game.mistakes == 1 ? 'mistake' : 'mistakes'}. You got there.',
       style: const TextStyle(color: Color(0xFF68717B)),
     ),
-    const SizedBox(height: 16),
+    const SizedBox(height: 4),
     resultControl(
       RunTimeline(
         setTimes: setTimes,
         unfinished: game.mode.timed ? game.mode.limit! - lastSet : null,
       ),
     ),
-    const SizedBox(height: 16),
-    if (game.mode.timed)
-      resultControl(
-        OutlinedButton(
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => BoardReviewScreen(
-                title: 'Last unsolved board',
-                board: PracticeBoard(
-                  cards: game.board.map((c) => c.id).toList(),
-                ),
-              ),
-            ),
-          ),
-          child: const Text('Review last unsolved board'),
-        ),
-      ),
+    const SizedBox(height: 4),
     Text('Seed: ${game.seed}'),
     Padding(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Text(
         !eligible
             ? attemptStorageFailed
@@ -1250,56 +1274,74 @@ class _GameScreenState extends State<GameScreen> {
         textAlign: TextAlign.center,
       ),
     ),
-    if (canSubmit &&
-        !submitted &&
-        !submitting &&
-        player?.nickname.isEmpty != false &&
-        currentSavedScore?['status'] != 'rejected')
-      resultControl(
-        OutlinedButton(
-          onPressed: submitScore,
-          child: const Text('Submit high score'),
-        ),
-      ),
     resultControl(
       Wrap(
         alignment: WrapAlignment.center,
         spacing: 8,
         children: [
-          TextButton(
-            onPressed: () => copySeed(game.seed!),
-            child: const Text('Share seed'),
-          ),
-          TextButton(
-            onPressed: submitting ? null : () => start(seed: game.seed),
-            child: const Text('Replay seed (practice)'),
-          ),
-          TextButton(
-            onPressed: () => openLeaderboard(seed: game.seed),
-            child: const Text('Seed high scores'),
-          ),
+          if (game.mode.timed)
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => BoardReviewScreen(
+                    title: 'Last unsolved board',
+                    board: PracticeBoard(
+                      cards: game.board.map((c) => c.id).toList(),
+                    ),
+                  ),
+                ),
+              ),
+              child: const Text('Review last unsolved board'),
+            ),
+          if (canSubmit &&
+              !submitted &&
+              !submitting &&
+              player?.nickname.isEmpty != false &&
+              currentSavedScore?['status'] != 'rejected')
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              onPressed: submitScore,
+              child: const Text('Submit high score'),
+            ),
         ],
       ),
     ),
-    const SizedBox(height: 16),
     resultControl(
-      FilledButton.icon(
-        onPressed: submitting ? null : start,
-        icon: const Icon(Icons.refresh_rounded),
-        label: const Text('Play again'),
+      TextButtonTheme(
+        data: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            minimumSize: const Size(48, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 3),
+            textStyle: Theme.of(context).textTheme.labelLarge
+                ?.copyWith(fontSize: 12),
+          ),
+        ),
+        child: Wrap(
+          alignment: WrapAlignment.center,
+          children: [
+            TextButton(
+              onPressed: () => copySeed(game.seed!),
+              child: const Text('Share seed'),
+            ),
+            TextButton(
+              onPressed: submitting ? null : () => start(seed: game.seed),
+              child: const Text('Replay seed (practice)'),
+            ),
+            TextButton(
+              onPressed: () => openLeaderboard(seed: game.seed),
+              child: const Text('Seed high scores'),
+            ),
+          ],
+        ),
       ),
     ),
-    const SizedBox(height: 12),
-    resultControl(
-      TextButton(
-        onPressed: submitting
-            ? null
-            : () => setState(() => phase = Phase.ready),
-        child: const Text('Back to start'),
-      ),
-    ),
-    const SizedBox(height: 24),
-  ]);
+  ];
 }
 
 String setCount(int sets) => '$sets ${sets == 1 ? 'set' : 'sets'}';

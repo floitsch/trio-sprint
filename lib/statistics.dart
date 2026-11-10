@@ -332,6 +332,20 @@ class _BoardReviewScreenState extends State<BoardReviewScreen> {
     if (index >= 0) solutionIndex = index;
   }
 
+  Widget solutionArrow(String tooltip, IconData icon, int step) => Visibility(
+    visible: reveal,
+    maintainSize: true,
+    maintainState: true,
+    maintainAnimation: true,
+    child: IconButton(
+      tooltip: tooltip,
+      onPressed: () => setState(() {
+        solutionIndex = (solutionIndex + step) % solutions.length;
+      }),
+      icon: Icon(icon),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final board = widget.board;
@@ -375,33 +389,27 @@ class _BoardReviewScreenState extends State<BoardReviewScreen> {
                 ),
               ),
             ),
-            Text(feedback),
-            if (reveal) ...[
-              Text('Solution ${solutionIndex + 1} of ${solutions.length}'),
-              if (solutions.length > 1)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    IconButton(
-                      tooltip: 'Previous solution',
-                      onPressed: () => setState(() {
-                        solutionIndex = (solutionIndex - 1) % solutions.length;
-                      }),
-                      icon: const Icon(Icons.chevron_left),
-                    ),
-                    IconButton(
-                      tooltip: 'Next solution',
-                      onPressed: () => setState(() {
-                        solutionIndex = (solutionIndex + 1) % solutions.length;
-                      }),
-                      icon: const Icon(Icons.chevron_right),
-                    ),
-                  ],
+            Text(
+              reveal
+                  ? 'Solution ${solutionIndex + 1} of ${solutions.length}'
+                  : feedback.isEmpty
+                  ? ' '
+                  : feedback,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (solutions.length > 1)
+                  solutionArrow('Previous solution', Icons.chevron_left, -1),
+                TextButton(
+                  onPressed: () => setState(() => reveal = !reveal),
+                  child: Text(reveal ? 'Hide solution' : 'Show solution'),
                 ),
-            ],
-            TextButton(
-              onPressed: () => setState(() => reveal = !reveal),
-              child: Text(reveal ? 'Hide solution' : 'Show solution'),
+                if (solutions.length > 1)
+                  solutionArrow('Next solution', Icons.chevron_right, 1),
+              ],
             ),
           ],
         ),

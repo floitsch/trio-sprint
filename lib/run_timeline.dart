@@ -73,13 +73,13 @@ class RunTimeline extends StatelessWidget {
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: SizedBox(
-                  height: 32,
+                  height: 16,
                   child: Row(
                     children: [
                       for (var i = 0; i < intervals.length; i++)
@@ -98,7 +98,7 @@ class RunTimeline extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
               const Text('Set times · tap for details'),
             ],
           ),

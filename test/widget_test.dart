@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trio_sprint/card_view.dart';
@@ -8,6 +9,11 @@ import 'package:trio_sprint/main.dart';
 import 'package:trio_sprint/run_timeline.dart';
 
 void main() {
+  setUpAll(() async {
+    final font = FontLoader('SetSans')
+      ..addFont(rootBundle.load('assets/fonts/Roboto-Regular.ttf'));
+    await font.load();
+  });
   setUp(() => SharedPreferences.setMockInitialValues({}));
   testWidgets(
     'a previously started seed is practice even after reloading the app',
@@ -167,8 +173,15 @@ void main() {
   testWidgets('two-second countdown, five sets, frozen result, quick replay', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    tester.view.padding = const FakeViewPadding(top: 24, bottom: 34);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
     await tester.pumpWidget(const TrioSprintApp());
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Start run'));
     await tester.tap(find.text('Start run'));
     await tester.pump();
     await tester.pump();
@@ -205,6 +218,15 @@ void main() {
       formatTime(timeline.setTimes.fold(Duration.zero, (a, b) => a + b)),
       result,
     );
+    expect(find.text('Back to start').hitTestable(), findsOneWidget);
+    expect(find.text('Play again').hitTestable(), findsOneWidget);
+    expect(
+      tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position
+          .maxScrollExtent,
+      0,
+    );
     await tester.ensureVisible(find.byKey(const ValueKey('run-timeline')));
     await tester.tap(find.byKey(const ValueKey('run-timeline')));
     await tester.pumpAndSettle();
@@ -215,7 +237,7 @@ void main() {
       scrollable: find.byType(Scrollable).last,
     );
     expect(find.text('Set 5'), findsOneWidget);
-    await tester.tapAt(const Offset(5, 5));
+    tester.state<NavigatorState>(find.byType(Navigator)).pop();
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 3));
     expect(

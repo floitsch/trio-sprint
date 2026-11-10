@@ -43,42 +43,52 @@ void main() {
     ]);
   });
 
-  testWidgets(
-    'review can reveal and browse all 13 sets without changing cards',
-    (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: BoardReviewScreen(board: board, title: 'Last unsolved board'),
-        ),
+  testWidgets('review can browse all 13 sets without moving the cards', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 740);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BoardReviewScreen(board: board, title: 'Last unsolved board'),
+      ),
+    );
+    Iterable<int> highlighted() => tester
+        .widgetList<CardView>(find.byType(CardView))
+        .where((c) => c.selected)
+        .map((c) => c.card.id);
+    List<Rect> cardPositions() => [
+      for (final id in board.cards)
+        tester.getRect(find.byKey(ValueKey('card-$id'))),
+    ];
+    final originalPositions = cardPositions();
+    expect(highlighted(), isEmpty);
+    await tester.tap(find.text('Show solution'));
+    await tester.pump();
+    for (var i = 0; i < expected.length; i++) {
+      expect(find.text('Solution ${i + 1} of 13'), findsOneWidget);
+      expect(highlighted(), expected[i]);
+      expect(cardPositions(), originalPositions);
+      expect(
+        tester
+            .widgetList<CardView>(find.byType(CardView))
+            .map((c) => c.card.id),
+        board.cards,
       );
-      Iterable<int> highlighted() => tester
-          .widgetList<CardView>(find.byType(CardView))
-          .where((c) => c.selected)
-          .map((c) => c.card.id);
-      expect(highlighted(), isEmpty);
-      await tester.tap(find.text('Show solution'));
+      await tester.tap(find.byTooltip('Next solution'));
       await tester.pump();
-      for (var i = 0; i < expected.length; i++) {
-        expect(find.text('Solution ${i + 1} of 13'), findsOneWidget);
-        expect(highlighted(), expected[i]);
-        expect(
-          tester
-              .widgetList<CardView>(find.byType(CardView))
-              .map((c) => c.card.id),
-          board.cards,
-        );
-        await tester.tap(find.byTooltip('Next solution'));
-        await tester.pump();
-      }
-      expect(highlighted(), expected.first);
-      await tester.tap(find.byTooltip('Previous solution'));
-      await tester.pump();
-      expect(highlighted(), expected.last);
-      await tester.tap(find.text('Hide solution'));
-      await tester.pump();
-      expect(highlighted(), isEmpty);
-    },
-  );
+    }
+    expect(highlighted(), expected.first);
+    await tester.tap(find.byTooltip('Previous solution'));
+    await tester.pump();
+    expect(highlighted(), expected.last);
+    await tester.tap(find.text('Hide solution'));
+    await tester.pump();
+    expect(highlighted(), isEmpty);
+    expect(cardPositions(), originalPositions);
+  });
 
   testWidgets(
     'solved board starts with the actual solution and offers alternatives',
