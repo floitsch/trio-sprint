@@ -2,13 +2,23 @@
 import 'package:flutter/material.dart';
 
 import 'game.dart';
+import 'practice.dart';
+import 'statistics.dart';
 
 /// Wall-clock intervals between solves, including time spent on mistakes.
 class RunTimeline extends StatelessWidget {
-  const RunTimeline({super.key, required this.setTimes, this.unfinished});
+  const RunTimeline({
+    super.key,
+    required this.setTimes,
+    this.unfinished,
+    this.boards = const [],
+    this.unfinishedBoard,
+  });
 
   final List<Duration> setTimes;
   final Duration? unfinished;
+  final List<PracticeBoard> boards;
+  final PracticeBoard? unfinishedBoard;
 
   static const colors = [
     Color(0xFF397B63),
@@ -30,7 +40,7 @@ class RunTimeline extends StatelessWidget {
 
     return Semantics(
       button: true,
-      label: 'Show individual set times',
+      label: 'Show individual set times and boards',
       child: InkWell(
         key: const ValueKey('run-timeline'),
         borderRadius: BorderRadius.circular(12),
@@ -55,17 +65,37 @@ class RunTimeline extends StatelessWidget {
                   child: ListView.builder(
                     shrinkWrap: true,
                     itemCount: intervals.length,
-                    itemBuilder: (context, i) => ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: color(i),
-                        foregroundColor: Colors.white,
-                        child: i < setTimes.length
-                            ? Text('${i + 1}')
-                            : const Icon(Icons.hourglass_empty),
-                      ),
-                      title: Text(label(i)),
-                      trailing: Text('${formatTime(intervals[i])} s'),
-                    ),
+                    itemBuilder: (context, i) {
+                      final board = i < setTimes.length
+                          ? (i < boards.length ? boards[i] : null)
+                          : unfinishedBoard;
+                      return ListTile(
+                        onTap: board == null
+                            ? null
+                            : () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => BoardReviewScreen(
+                                    board: board,
+                                    title: label(i),
+                                    showSolution: i < setTimes.length,
+                                  ),
+                                ),
+                              ),
+                        leading: CircleAvatar(
+                          backgroundColor: color(i),
+                          foregroundColor: Colors.white,
+                          child: i < setTimes.length
+                              ? Text('${i + 1}')
+                              : const Icon(Icons.hourglass_empty),
+                        ),
+                        title: Text(label(i)),
+                        subtitle: board == null
+                            ? null
+                            : const Text('Tap to review cards'),
+                        trailing: Text('${formatTime(intervals[i])} s'),
+                      );
+                    },
                   ),
                 ),
               ],

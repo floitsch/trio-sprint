@@ -126,6 +126,12 @@ void main() {
     expect(find.text('SETS IN ONE MINUTE'), findsOneWidget);
     final timeline = tester.widget<RunTimeline>(find.byType(RunTimeline));
     expect(timeline.setTimes, hasLength(6));
+    expect(timeline.boards, hasLength(6));
+    for (final board in timeline.boards) {
+      expect(board.cards, containsAll(board.solutionCards));
+      expect(isSet(board.solutionCards.map(SetCard.new).toList()), isTrue);
+    }
+    expect(timeline.unfinishedBoard!.cards, hasLength(12));
     expect(
       timeline.setTimes.fold(Duration.zero, (a, b) => a + b) +
           timeline.unfinished!,

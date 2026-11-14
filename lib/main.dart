@@ -19,6 +19,7 @@ import 'update.dart';
 import 'practice.dart';
 import 'run_history.dart';
 import 'run_timeline.dart';
+import 'set_quiz.dart';
 
 void main() => runApp(const TrioSprintApp());
 
@@ -84,6 +85,7 @@ class _GameScreenState extends State<GameScreen> {
   bool submitting = false;
   final solutions = <List<int>>[];
   final setTimes = <Duration>[];
+  final runBoards = <PracticeBoard>[];
   final boardClock = BoardClock();
   int boardMistakes = 0;
   RunMode mode = RunMode.sprint;
@@ -404,6 +406,7 @@ class _GameScreenState extends State<GameScreen> {
     eligible = firstAttempt;
     solutions.clear();
     setTimes.clear();
+    runBoards.clear();
     lastSet = Duration.zero;
     stopClocks();
     watch.reset();
@@ -514,6 +517,12 @@ class _GameScreenState extends State<GameScreen> {
     setState(() {
       final attempt = [...game.selected, card.id];
       if (attempt.length == 3 && isSet(attempt.map(SetCard.new).toList())) {
+        runBoards.add(
+          PracticeBoard(
+            cards: game.board.map((card) => card.id).toList(),
+            solutionCards: attempt,
+          ),
+        );
         rememberBoard(solution: attempt);
       }
       final result = game.pick(card.id);
@@ -874,6 +883,13 @@ class _GameScreenState extends State<GameScreen> {
             MaterialPageRoute(builder: (_) => TrainingScreen(player: player)),
           ),
           child: const Text('Training'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SetQuizScreen()),
+          ),
+          child: const Text('Is this a set?'),
         ),
         TextButton(onPressed: () => openRace(), child: const Text('1 vs 1')),
         TextButton(
@@ -1244,6 +1260,10 @@ class _GameScreenState extends State<GameScreen> {
     resultControl(
       RunTimeline(
         setTimes: setTimes,
+        boards: runBoards,
+        unfinishedBoard: game.mode.timed
+            ? PracticeBoard(cards: game.board.map((card) => card.id).toList())
+            : null,
         unfinished: game.mode.timed ? game.mode.limit! - lastSet : null,
       ),
     ),

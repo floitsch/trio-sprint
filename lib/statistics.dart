@@ -306,9 +306,11 @@ class BoardReviewScreen extends StatefulWidget {
     super.key,
     required this.board,
     required this.title,
+    this.showSolution = false,
   });
   final PracticeBoard board;
   final String title;
+  final bool showSolution;
   @override
   State<BoardReviewScreen> createState() => _BoardReviewScreenState();
 }
@@ -325,6 +327,7 @@ class _BoardReviewScreenState extends State<BoardReviewScreen> {
   @override
   void initState() {
     super.initState();
+    reveal = widget.showSolution;
     final actual = widget.board.solutionCards.toSet();
     final index = solutions.indexWhere(
       (trio) => actual.length == trio.length && trio.containsAll(actual),

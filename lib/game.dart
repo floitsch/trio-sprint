@@ -335,3 +335,45 @@ class TrainingExercise {
   bool accepts(List<SetCard> cards) =>
       isSet(cards) && differentAttributes(cards) == differences;
 }
+
+/// A balanced recognition exercise, sampled after choosing the answer.
+class SetQuizExercise {
+  SetQuizExercise({bool difficultOnly = false, Random? random}) {
+    final rng = random ?? Random();
+    answer = rng.nextBool();
+    while (true) {
+      final a = rng.nextInt(81);
+      var b = rng.nextInt(80);
+      if (b >= a) b++;
+      final first = SetCard(a);
+      final second = SetCard(b);
+      var thirdId = 0;
+      var place = 1;
+      for (var i = 0; i < 4; i++) {
+        thirdId +=
+            ((6 - first.attributes[i] - second.attributes[i]) % 3) * place;
+        place *= 3;
+      }
+      if (!answer) {
+        // Exclude both chosen cards and the one valid completion.
+        final excluded = [a, b, thirdId]..sort();
+        thirdId = rng.nextInt(78);
+        for (final id in excluded) {
+          if (thirdId >= id) thirdId++;
+        }
+      }
+      final trio = [first, second, SetCard(thirdId)];
+      final same = List.generate(4, (i) => i)
+          .where(
+            (i) => trio.map((card) => card.attributes[i]).toSet().length == 1,
+          )
+          .length;
+      if (difficultOnly && same > 1) continue;
+      cards = trio..shuffle(rng);
+      return;
+    }
+  }
+
+  late final bool answer;
+  late final List<SetCard> cards;
+}

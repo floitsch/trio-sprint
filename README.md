@@ -20,8 +20,10 @@ Leaving the app does not pause the stopwatch.
 - **Timed runs:** choose **1 min** or **3 min** on the start screen to find as
   many sets as you can before time runs out. Boards keep evolving the same way.
   Results include a colored time bar. Tap it for each set’s solving time and
-  the time spent on the final unsolved board. Results appear immediately;
-  buttons appear after one second to prevent
+  the time spent on the final unsolved board.
+  Tap a set in the time breakdown to review its original board with your chosen
+  trio highlighted. The unfinished interval also opens its board for review.
+  Results appear immediately; buttons appear after one second to prevent
   accidental taps while finishing a set.
   After timeout, **Review last unsolved board** opens the exact last layout,
   with solutions hidden until you choose to reveal them. Use the arrows to
@@ -93,6 +95,15 @@ Leaving the app does not pause the stopwatch.
   seconds per mistake and 15 seconds for a hint, skip or difficulty-related restart. Repeated boards keep
   the latest attempt. History stays on this device and works offline; time in
   the background does not affect this practice ranking or pause a sprint score.
+- **Is this a set?** shows three random, distinct cards and asks for Yes or No.
+  Each question first chooses its answer with equal probability, then generates
+  matching cards. Choose a **1 min** or **3 min** race, starting after a two-second
+  countdown. Each answer immediately deals a new trio: correct answers give a
+  short haptic click and earn 1 point; wrong answers give a stronger haptic and
+  lose 1 point. The clock keeps running in the background. Results show your
+  score and correct/wrong counts. **Difficult only** limits both
+  valid and invalid trios to at most one property shared by all three cards.
+  This mode works offline.
 - **Statistics:** every new board attempt is saved locally with its layout,
   actual solution when solved, active viewing time, mistakes, assistance, mode,
   timestamp and outcome. Statistics shows solved counts, median unassisted
