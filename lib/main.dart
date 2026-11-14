@@ -21,6 +21,7 @@ import 'run_history.dart';
 import 'run_timeline.dart';
 import 'set_quiz.dart';
 import 'quiz_leaderboard.dart';
+import 'quiz_seed.dart';
 
 void main() => runApp(const TrioSprintApp());
 
@@ -196,6 +197,11 @@ class _GameScreenState extends State<GameScreen> {
         ..start();
       final link = normalizeDeviceCode(Uri.base.queryParameters['link'] ?? '');
       final room = Uri.base.queryParameters['room'];
+      final quiz = QuizSeed.parse(
+        Uri.base.queryParameters['quiz'] ??
+            Uri.base.queryParameters['seed'] ??
+            '',
+      );
       if (link != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
@@ -205,6 +211,21 @@ class _GameScreenState extends State<GameScreen> {
               builder: (_) => DevicesScreen(player: loaded, initialCode: link),
             ),
           );
+        });
+      } else if (quiz != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => SetQuizScreen(
+                  player: loaded,
+                  sync: syncService,
+                  seed: quiz.value,
+                ),
+              ),
+            );
+          }
         });
       } else if (room != null && RegExp(r'^[A-Z0-9]{6}$').hasMatch(room)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -255,6 +276,22 @@ class _GameScreenState extends State<GameScreen> {
       ),
     );
     if (!mounted || result == null) return;
+    final quiz = QuizSeed.parse(result);
+    if (quiz != null) {
+      await loading;
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SetQuizScreen(
+            player: player,
+            sync: syncService,
+            seed: quiz.value,
+          ),
+        ),
+      );
+      return;
+    }
     final seed = normalizeSeed(result);
     if (seed == null) {
       message('Enter a seed such as s2-1234abcd.');
@@ -937,8 +974,7 @@ class _GameScreenState extends State<GameScreen> {
       alignment: WrapAlignment.center,
       spacing: 8,
       children: [
-        if (!quizMode)
-          TextButton(onPressed: enterSeed, child: const Text('Run a seed')),
+        TextButton(onPressed: enterSeed, child: const Text('Run a seed')),
         if (!quizMode)
           TextButton(
             onPressed: () async {

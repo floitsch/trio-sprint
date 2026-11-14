@@ -1,5 +1,6 @@
 // Copyright (C) 2026 Florian Loitsch.
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +10,8 @@ import 'game.dart';
 import 'data.dart';
 import 'leaderboard.dart';
 import 'quiz_leaderboard.dart';
+import 'quiz_review.dart';
+import 'quiz_seed.dart';
 import 'sync.dart';
 
 class SetQuizScreen extends StatefulWidget {
@@ -19,12 +22,14 @@ class SetQuizScreen extends StatefulWidget {
     this.seconds = 30,
     this.difficult = false,
     this.autoStart = false,
+    this.seed,
   });
   final PlayerData? player;
   final SyncService? sync;
   final int seconds;
   final bool difficult;
   final bool autoStart;
+  final String? seed;
 
   @override
   State<SetQuizScreen> createState() => _SetQuizScreenState();
@@ -50,9 +55,62 @@ class _SetQuizScreenState extends State<SetQuizScreen>
   bool resultsLocked = false;
   String runId = '';
   final answers = <List<Object>>[];
+  List<int>? unfinishedCards;
   bool saving = false;
   bool saveFailed = false;
   int? previousBest;
+  late QuizSeed? pendingSeed = QuizSeed.parse(widget.seed ?? '');
+  QuizSeed? activeSeed;
+  Random? random;
+  bool practice = false;
+
+  Future<void> copySeed() async {
+    await Clipboard.setData(
+      ClipboardData(text: shareLink('quiz', activeSeed!.value)),
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Seed link copied.')));
+    }
+  }
+
+  Future<void> enterSeed() async {
+    var input = '';
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Run a seed'),
+        content: TextField(
+          onChanged: (value) => input = value,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'q1-30-n-1234abcd or a shared link',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, input),
+            child: const Text('Run seed'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || result == null) return;
+    final parsed = QuizSeed.parse(result);
+    if (parsed == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter a recognition seed such as q1-30-n-1234abcd.'),
+        ),
+      );
+      return;
+    }
+    start(seed: parsed.value);
+  }
 
   Future<void> highScores() => Navigator.push(
     context,
@@ -67,7 +125,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
 
   Future<void> saveResult() async {
     final player = widget.player;
-    if (player == null || answers.isEmpty) return;
+    if (player == null || answers.isEmpty || practice) return;
     setState(() {
       saving = true;
       saveFailed = false;
@@ -94,6 +152,10 @@ class _SetQuizScreenState extends State<SetQuizScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (pendingSeed case final seed?) {
+      limit = Duration(seconds: seed.seconds);
+      difficultOnly = seed.difficult;
+    }
     if (widget.autoStart) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) start();
@@ -109,11 +171,22 @@ class _SetQuizScreenState extends State<SetQuizScreen>
     watch.stop();
   }
 
-  void start() {
+  void start({String? seed}) {
+    final chosen =
+        QuizSeed.parse(seed ?? '') ??
+        pendingSeed ??
+        QuizSeed.create(limit.inSeconds, difficultOnly);
+    practice = seed != null || pendingSeed != null;
+    pendingSeed = null;
+    activeSeed = chosen;
+    random = chosen.random();
+    limit = Duration(seconds: chosen.seconds);
+    difficultOnly = chosen.difficult;
     stopTimers();
     watch.reset();
     runId = randomId();
     answers.clear();
+    unfinishedCards = null;
     previousBest = widget.player?.quizBest(limit.inSeconds, difficultOnly);
     setState(() {
       phase = _RacePhase.countdown;
@@ -131,7 +204,10 @@ class _SetQuizScreenState extends State<SetQuizScreen>
       } else {
         timer.cancel();
         setState(() {
-          exercise = SetQuizExercise(difficultOnly: difficultOnly);
+          exercise = SetQuizExercise(
+            difficultOnly: difficultOnly,
+            random: random,
+          );
           phase = _RacePhase.playing;
           watch.start();
         });
@@ -157,6 +233,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
     if (phase != _RacePhase.playing) return;
     stopTimers();
     setState(() {
+      unfinishedCards = exercise!.cards.map((card) => card.id).toList();
       phase = _RacePhase.finished;
       remaining = Duration.zero;
       exercise = null;
@@ -188,7 +265,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
       } else {
         mistakes++;
       }
-      exercise = SetQuizExercise(difficultOnly: difficultOnly);
+      exercise = SetQuizExercise(difficultOnly: difficultOnly, random: random);
     });
   }
 
@@ -223,7 +300,10 @@ class _SetQuizScreenState extends State<SetQuizScreen>
           ButtonSegment(value: Duration(minutes: 3), label: Text('3 min')),
         ],
         selected: {limit},
-        onSelectionChanged: (value) => setState(() => limit = value.single),
+        onSelectionChanged: (value) => setState(() {
+          limit = value.single;
+          pendingSeed = null;
+        }),
       ),
       const SizedBox(height: 16),
       CheckboxListTile(
@@ -233,63 +313,101 @@ class _SetQuizScreenState extends State<SetQuizScreen>
           'At most one property is the same across all three cards, for both valid and invalid trios.',
         ),
         value: difficultOnly,
-        onChanged: (value) => setState(() => difficultOnly = value!),
+        onChanged: (value) => setState(() {
+          difficultOnly = value!;
+          pendingSeed = null;
+        }),
       ),
       const SizedBox(height: 16),
+      if (pendingSeed case final seed?) Text('Seed: ${seed.value} · Practice'),
       FilledButton(onPressed: start, child: const Text('Start race')),
+      TextButton(onPressed: enterSeed, child: const Text('Run a seed')),
       TextButton(onPressed: highScores, child: const Text('High scores')),
     ],
   );
 
-  Widget playing() => Column(
-    children: [
-      Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Score: $score'),
-            Text(
-              formatTime(remaining),
-              key: const ValueKey('quiz-time'),
-              style: const TextStyle(
-                fontFeatures: [FontFeature.tabularFigures()],
+  Widget playing() => LayoutBuilder(
+    builder: (context, constraints) => Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Score: $score'),
+              Text(
+                formatTime(remaining),
+                key: const ValueKey('quiz-time'),
+                style: const TextStyle(
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
               ),
-            ),
-          ],
-        ),
-      ),
-      Expanded(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: CardBoard(
-            cards: exercise!.cards.map((card) => card.id).toList(),
-            columns: 3,
+            ],
           ),
         ),
-      ),
-      Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () => answer(false),
-                child: const Text('No'),
-              ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: CardBoard(
+              cards: exercise!.cards.map((card) => card.id).toList(),
+              columns: 3,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: FilledButton(
-                onPressed: () => answer(true),
-                child: const Text('Yes'),
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
-    ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 16, 12, 32),
+          child: SizedBox(
+            height: (constraints.maxHeight * .2).clamp(80.0, 112.0).toDouble(),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => answer(false),
+                    child: const Text(
+                      'No',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => answer(true),
+                    child: const Text(
+                      'Yes',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
   );
+
+  void reviewTrios() {
+    final trios = [
+      for (final entry in answers)
+        QuizReviewTrio(
+          cards: entry.take(3).cast<int>().toList(),
+          answer: entry[3] as bool,
+        ),
+      if (unfinishedCards case final cards?) QuizReviewTrio(cards: cards),
+    ];
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => QuizReviewScreen(trios: trios)),
+    );
+  }
 
   String get scoreSyncStatus {
     final saved = widget.player?.savedQuizScore(runId);
@@ -330,9 +448,14 @@ class _SetQuizScreenState extends State<SetQuizScreen>
           (previousBest == null || score > previousBest!) &&
           !saveFailed &&
           !saving &&
-          widget.player != null)
+          widget.player != null &&
+          !practice)
         const Text('New personal best!'),
-      if (saving)
+      if (practice)
+        const Text(
+          'Practice replay. Personal best and high scores are unchanged.',
+        )
+      else if (saving)
         const Text('Saving score…')
       else if (saveFailed) ...[
         const Text('Could not save this score.'),
@@ -343,7 +466,8 @@ class _SetQuizScreenState extends State<SetQuizScreen>
         const Text('Device storage is unavailable; this score cannot be saved.')
       else
         Semantics(liveRegion: true, child: Text(scoreSyncStatus)),
-      if (answers.isNotEmpty &&
+      if (!practice &&
+          answers.isNotEmpty &&
           widget.player != null &&
           widget.player!.nickname.isEmpty)
         TextButton(
@@ -353,9 +477,27 @@ class _SetQuizScreenState extends State<SetQuizScreen>
           },
           child: const Text('Set nickname'),
         ),
+      if (answers.isNotEmpty || unfinishedCards != null)
+        OutlinedButton.icon(
+          onPressed: resultsLocked ? null : reviewTrios,
+          icon: const Icon(Icons.view_carousel_outlined),
+          label: const Text('Review trios'),
+        ),
       TextButton(
         onPressed: resultsLocked ? null : highScores,
         child: const Text('High scores'),
+      ),
+      SelectableText('Seed: ${activeSeed!.value}'),
+      TextButton.icon(
+        onPressed: resultsLocked ? null : copySeed,
+        icon: const Icon(Icons.copy),
+        label: const Text('Copy seed link'),
+      ),
+      TextButton(
+        onPressed: resultsLocked || saving
+            ? null
+            : () => start(seed: activeSeed!.value),
+        child: const Text('Replay seed (practice)'),
       ),
       const SizedBox(height: 24),
       FilledButton(

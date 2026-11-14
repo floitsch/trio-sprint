@@ -111,7 +111,14 @@ Leaving the app does not pause the stopwatch.
   upload and retry automatically, including after offline play or a lost reply.
   The server checks each answer and calculates the score. As with solo sprint
   times, the elapsed race time is trusted. Recognition answers are kept separate
-  from solved-board statistics and Total sets.
+  from solved-board statistics and Total sets. On the results screen, **Review
+  trios** lets you browse every answered trio and the final unanswered trio,
+  see your answer and the correct answer, and filter to **Wrong only**.
+  The results also show a versioned seed such as `q1-30-n-1234abcd`, with a copy
+  link and **Replay seed (practice)**. A recognition seed fixes the duration,
+  difficulty (`n` normal, `h` difficult) and entire sequence independently of your
+  answers. Paste a seed or shared link into **Run a seed** to replay it. These
+  replays are practice and do not change personal bests or publish high scores.
 - **Statistics:** every new board attempt is saved locally with its layout,
   actual solution when solved, active viewing time, mistakes, assistance, mode,
   timestamp and outcome. Statistics shows solved counts, median unassisted

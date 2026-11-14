@@ -14,6 +14,8 @@ import 'package:trio_sprint/quiz_leaderboard.dart';
 import 'package:trio_sprint/set_quiz.dart';
 import 'package:trio_sprint/sync.dart';
 import 'package:trio_sprint/practice.dart';
+import 'package:trio_sprint/quiz_seed.dart';
+import 'package:trio_sprint/quiz_review.dart';
 
 void main() {
   for (final difficult in [false, true]) {
@@ -202,6 +204,137 @@ void main() {
     sync.dispose();
   });
 
+  testWidgets(
+    'results show a reproducible seed and review without changing scores',
+    (tester) async {
+      String? copiedText;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copiedText = (call.arguments as Map)['text'] as String;
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      final player = await PlayerData.load();
+      await tester.pumpWidget(MaterialApp(home: SetQuizScreen(player: player)));
+      await startRace(tester);
+      final seen = <List<int>>[];
+      for (var i = 0; i < 2; i++) {
+        final current = cards(tester);
+        seen.add(current.map((c) => c.id).toList());
+        await tester.tap(find.text(isSet(current) == i.isEven ? 'Yes' : 'No'));
+        await tester.pump();
+      }
+      final unanswered = cards(tester).map((c) => c.id).toList();
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pump();
+      final label = tester
+          .widget<SelectableText>(find.byType(SelectableText))
+          .data!;
+      final seed = QuizSeed.parse(label.substring('Seed: '.length))!;
+      expect(seed.seconds, 30);
+      final original = player.savedQuizScores;
+      expect(original, hasLength(1));
+      await tester.pump(const Duration(seconds: 1));
+      await tester.scrollUntilVisible(
+        find.text('Copy seed link'),
+        120,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Copy seed link'));
+      await tester.pump();
+      expect(QuizSeed.parse(copiedText!)!.value, seed.value);
+      await tester.scrollUntilVisible(
+        find.text('Review trios'),
+        120,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Review trios'));
+      await tester.pumpAndSettle();
+      final review = tester.widget<QuizReviewScreen>(
+        find.byType(QuizReviewScreen),
+      );
+      expect(review.trios.map((t) => t.cards), [...seen, unanswered]);
+      expect(review.trios.map((t) => t.status), [
+        'Correct',
+        'Wrong',
+        'Unanswered',
+      ]);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(player.savedQuizScores, original);
+      await tester.scrollUntilVisible(
+        find.text('Replay seed (practice)'),
+        -120,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Replay seed (practice)'));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+      expect(cards(tester).map((c) => c.id), seen.first);
+      await tester.tap(find.text(isSet(cards(tester)) ? 'No' : 'Yes'));
+      await tester.pump();
+      expect(cards(tester).map((c) => c.id), seen[1]);
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pump();
+      expect(
+        find.text(
+          'Practice replay. Personal best and high scores are unchanged.',
+        ),
+        findsOneWidget,
+      );
+      expect(player.savedQuizScores, original);
+      expect(player.quizBest(30, false), 0);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('recognition setup accepts its own seed entry', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: SetQuizScreen()));
+    await tester.ensureVisible(find.text('Run a seed'));
+    await tester.tap(find.text('Run a seed'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'q1-30-n-1234abcd');
+    await tester.tap(find.text('Run seed'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 2));
+    expect(cards(tester).map((c) => c.id), [42, 27, 48]);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'shared seed settings and cards are honored by the main seed dialog',
+    (tester) async {
+      await tester.pumpWidget(const TrioSprintApp());
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Run a seed'));
+      await tester.tap(find.text('Run a seed'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byType(TextField),
+        'https://example.com/?quiz=q1-180-h-ffffffff',
+      );
+      await tester.tap(find.text('Run seed'));
+      await tester.pumpAndSettle();
+      expect(find.text('Seed: q1-180-h-ffffffff · Practice'), findsOneWidget);
+      await startRace(tester);
+      expect(cards(tester).map((c) => c.id), [28, 72, 20]);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   for (final size in [const Size(320, 480), const Size(740, 360)]) {
     testWidgets('integrated Yes / No selector and leaderboard fit at $size', (
       tester,
@@ -291,9 +424,14 @@ void main() {
             .length;
         expect(same, lessThanOrEqualTo(1));
         final chooseCorrect = round.isEven;
-        await tester.tap(
-          find.text(isSet(current) == chooseCorrect ? 'Yes' : 'No'),
-        );
+        final yes = isSet(current) == chooseCorrect;
+        final button = yes
+            ? find.widgetWithText(FilledButton, 'Yes')
+            : find.widgetWithText(OutlinedButton, 'No');
+        final target = tester.getRect(button);
+        expect(target.height, greaterThanOrEqualTo(80));
+        expect(target.bottom, lessThanOrEqualTo(size.height - 32));
+        await tester.tapAt(Offset(target.center.dx, target.top + 8));
         await tester.pump();
         expect(
           haptics.last,
@@ -332,14 +470,17 @@ void main() {
       expect(haptics, hasLength(4));
       expect(
         tester
-            .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Race again'),
-            )
+            .widget<TextButton>(find.widgetWithText(TextButton, 'High scores'))
             .onPressed,
         isNull,
       );
       await tester.pump(const Duration(seconds: 1));
-      await tester.ensureVisible(find.text('Race again'));
+      await tester.scrollUntilVisible(
+        find.text('Race again'),
+        120,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Race again'));
       await tester.pump();
       await tester.pump(const Duration(seconds: 2));
