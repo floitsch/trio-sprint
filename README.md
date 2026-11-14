@@ -17,6 +17,13 @@ For every feature — number, shape, color, fill — the three cards must be all
 same or all different. Wrong trios count as mistakes while the clock continues.
 Leaving the app does not pause the stopwatch.
 
+- **Beat my best:** once you have a personal best, enable this beside **Start
+  run** in five-set mode. Each attempt gets a fresh seed and automatically starts
+  over at 1.2× your personal best. Finishing without strictly beating your best
+  also starts a fresh attempt immediately. The loop stops on a new personal best,
+  or when you choose **Stop**. Normal countdowns, history, score syncing and
+  first-attempt rules still apply; a timed-out attempt is kept for difficult-board
+  practice, and an interrupted attempt is excluded.
 - **Timed runs:** choose **1 min** or **3 min** on the start screen to find as
   many sets as you can before time runs out. Boards keep evolving the same way.
   Results include a colored time bar. Tap it for each set’s solving time and

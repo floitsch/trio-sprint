@@ -61,7 +61,8 @@ class TrioSprintApp extends StatelessWidget {
 enum Phase { ready, countdown, playing, finished }
 
 class GameScreen extends StatefulWidget {
-  const GameScreen({super.key});
+  const GameScreen({super.key, this.stopwatch});
+  final Stopwatch? stopwatch;
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -92,6 +93,58 @@ class _GameScreenState extends State<GameScreen> {
   int boardMistakes = 0;
   RunMode mode = RunMode.sprint;
   bool quizMode = false;
+  bool chaseBest = false;
+  Duration? chaseTarget;
+  Duration? get chaseLimit => chaseTarget == null
+      ? null
+      : Duration(microseconds: (chaseTarget!.inMicroseconds * 6 + 4) ~/ 5);
+
+  void reachRunLimit() {
+    if (phase != Phase.playing || starting) return;
+    if (game.mode.timed) {
+      endTimedRun();
+    } else if (chaseTarget != null &&
+        !{
+          AppLifecycleState.inactive,
+          AppLifecycleState.paused,
+          AppLifecycleState.hidden,
+          AppLifecycleState.detached,
+        }.contains(WidgetsBinding.instance.lifecycleState)) {
+      unawaited(start());
+    }
+  }
+
+  void stopChase() {
+    runGeneration++;
+    starting = false;
+    stopClocks();
+    rememberBoard(outcome: AttemptOutcome.interrupted);
+    rememberRun(completed: false);
+    boardClock.stop();
+    setState(() {
+      chaseTarget = null;
+      phase = Phase.ready;
+    });
+  }
+
+  Future<void> continueChase(Future<void> saved, int generation) async {
+    await saved;
+    if (!mounted ||
+        generation != runGeneration ||
+        chaseTarget == null ||
+        phase != Phase.countdown) {
+      return;
+    }
+    if (currentSavedScore == null) {
+      setState(() {
+        chaseTarget = null;
+        phase = Phase.finished;
+      });
+      return;
+    }
+    await start();
+  }
+
   int quizSeconds = 30;
   bool quizDifficult = false;
 
@@ -399,7 +452,7 @@ class _GameScreenState extends State<GameScreen> {
     ),
   );
 
-  final watch = Stopwatch();
+  late final watch = widget.stopwatch ?? Stopwatch();
   final elapsed = ValueNotifier(Duration.zero);
   Timer? ticker;
   Timer? countdownTimer;
@@ -441,7 +494,8 @@ class _GameScreenState extends State<GameScreen> {
     // A seed generated right here cannot have been run anywhere else. Others
     // (typed, linked or from the high scores) might have been, so ask, unless
     // this device already knows it is a replay.
-    var firstTime = seed == null && pendingSeed == null;
+    final generatedHere = seed == null && pendingSeed == null;
+    var firstTime = generatedHere;
     if (!firstTime && player != null) {
       var known = false;
       try {
@@ -491,6 +545,16 @@ class _GameScreenState extends State<GameScreen> {
       final previousBest = player?.bestForSeed(chosenSeed);
       best = previousBest == null ? null : Duration(milliseconds: previousBest);
       timedBest = mode.timed ? player?.timedBest(mode) : null;
+      chaseTarget =
+          chaseBest &&
+              eligible &&
+              generatedHere &&
+              chosenSeed.startsWith('s2-') &&
+              mode == RunMode.sprint &&
+              best != null &&
+              best! > Duration.zero
+          ? best
+          : null;
       countdown = 2;
       phase = Phase.countdown;
       feedback = 'Pick three cards that make a set.';
@@ -503,12 +567,12 @@ class _GameScreenState extends State<GameScreen> {
         watch.start();
         boardClock.start();
         setState(() => phase = Phase.playing);
-        final limit = game.mode.limit;
-        if (limit != null) deadline = Timer(limit, endTimedRun);
+        final limit = game.mode.limit ?? chaseLimit;
+        if (limit != null) deadline = Timer(limit, reachRunLimit);
         ticker = Timer.periodic(const Duration(milliseconds: 33), (_) {
           elapsed.value = watch.elapsed;
           // Timers may be late while the app is in the background.
-          if (limit != null && watch.elapsed >= limit) endTimedRun();
+          if (limit != null && watch.elapsed >= limit) reachRunLimit();
         });
       }
     });
@@ -550,7 +614,10 @@ class _GameScreenState extends State<GameScreen> {
     rememberBoard(outcome: outcome);
     rememberRun(completed: false);
     boardClock.stop();
-    setState(() => phase = Phase.ready);
+    setState(() {
+      chaseTarget = null;
+      phase = Phase.ready;
+    });
   }
 
   void endTimedRun() {
@@ -582,9 +649,9 @@ class _GameScreenState extends State<GameScreen> {
 
   void pick(SetCard card) {
     if (phase != Phase.playing || starting) return;
-    final limit = game.mode.limit;
+    final limit = game.mode.limit ?? chaseLimit;
     if (limit != null && watch.elapsed >= limit) {
-      endTimedRun();
+      reachRunLimit();
       return;
     }
     setState(() {
@@ -625,9 +692,17 @@ class _GameScreenState extends State<GameScreen> {
           if (eligible) {
             player?.saveBest(watch.elapsedMilliseconds, seed: game.seed!);
           }
-          phase = Phase.finished;
+          final again = chaseTarget != null && !newBest;
+          if (newBest) chaseTarget = null;
+          phase = again ? Phase.countdown : Phase.finished;
+          countdown = 2;
           HapticFeedback.mediumImpact();
-          unawaited(submitScore(automatic: true));
+          final saved = submitScore(automatic: true);
+          if (again) {
+            unawaited(continueChase(saved, runGeneration));
+          } else {
+            unawaited(saved);
+          }
         case PickResult.selected:
         case PickResult.deselected:
           feedback = game.selected.isEmpty
@@ -783,8 +858,12 @@ class _GameScreenState extends State<GameScreen> {
                         ),
                         if (inRun) ...[
                           TextButton(
-                            onPressed: abandon,
-                            child: const Text('Abandon'),
+                            onPressed: chaseTarget == null
+                                ? abandon
+                                : stopChase,
+                            child: Text(
+                              chaseTarget == null ? 'Abandon' : 'Stop',
+                            ),
                           ),
                           IconButton(
                             tooltip: 'Restart run',
@@ -958,12 +1037,44 @@ class _GameScreenState extends State<GameScreen> {
         Text('Personal best: $best'),
     ],
     const SizedBox(height: 12),
-    FilledButton.icon(
-      onPressed: quizMode ? startQuiz : start,
-      iconAlignment: IconAlignment.end,
-      icon: const Icon(Icons.arrow_forward_rounded),
-      label: const Text('Start run'),
+    Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 12,
+      runSpacing: 8,
+      children: [
+        FilledButton.icon(
+          onPressed: quizMode ? startQuiz : start,
+          iconAlignment: IconAlignment.end,
+          icon: const Icon(Icons.arrow_forward_rounded),
+          label: const Text('Start run'),
+        ),
+        if (!quizMode &&
+            mode == RunMode.sprint &&
+            pendingSeed == null &&
+            (player?.best ?? 0) > 0)
+          Tooltip(
+            message: 'Keep restarting after 1.2× your best until you beat it.',
+            child: FilterChip(
+              label: const Text('Beat my best'),
+              selected: chaseBest,
+              onSelected: (value) => setState(() => chaseBest = value),
+            ),
+          ),
+      ],
     ),
+    if (!quizMode &&
+        mode == RunMode.sprint &&
+        chaseBest &&
+        pendingSeed == null &&
+        (player?.best ?? 0) > 0)
+      Padding(
+        padding: const EdgeInsets.all(8),
+        child: Text(
+          'Beat ${formatTime(Duration(milliseconds: player!.best!))} · auto-reset at ${formatTime(Duration(microseconds: player!.best! * 1200))}',
+          textAlign: TextAlign.center,
+        ),
+      ),
     if (pendingSeed != null)
       Padding(
         padding: const EdgeInsets.all(8),
@@ -1078,6 +1189,8 @@ class _GameScreenState extends State<GameScreen> {
           Text(
             game.mode.timed
                 ? '${game.mode.label}. Every set counts.'
+                : chaseTarget != null
+                ? 'Beat ${formatTime(chaseTarget!)}. You’ve got this.'
                 : 'Five sets. You’ve got this.',
             style: const TextStyle(fontSize: 17),
           ),
@@ -1183,6 +1296,14 @@ class _GameScreenState extends State<GameScreen> {
           ),
         ),
       ),
+      if (chaseTarget != null)
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            'Beat ${formatTime(chaseTarget!)} · auto-reset at ${formatTime(chaseLimit!)}',
+            style: const TextStyle(fontSize: 11, color: accent),
+          ),
+        ),
       if (game.seed!.startsWith('s1-'))
         const Text(
           'Legacy seed · new board after each set',
