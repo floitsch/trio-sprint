@@ -56,7 +56,7 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
         // Re-read the outbox after every request. A run can finish while a
         // board upload is in flight, and should not wait for the next timer.
         while (!_disposed) {
-          final scores = player.savedScores.where(
+          final scores = player.allSavedScores.where(
             (score) =>
                 score['status'] == 'pending' &&
                 ((score['name'] as String).isNotEmpty ||
@@ -72,9 +72,13 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
             }
             final body = Map<String, dynamic>.from(score)
               ..remove('status')
-              ..remove('error');
+              ..remove('error')
+              ..remove('game');
             try {
-              await api.request('/scores', body: body);
+              await api.request(
+                score['game'] == 'quiz' ? '/quiz-scores' : '/scores',
+                body: body,
+              );
               probablyOffline = false;
               score['status'] = 'synced';
               await player.updateSavedScore(score);

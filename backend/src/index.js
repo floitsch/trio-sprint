@@ -1,4 +1,5 @@
 // Copyright (C) 2026 Florian Loitsch.
+import {saveQuizScore, quizScoreQuery} from './quiz_scores.js';
 import { validHandicap, visibleBoard, delayBoard } from './handicap.js';
 import { validAttempts, saveAttempts } from './attempts.js';
 import { savePlayerName, totalSetsQuery } from './set_totals.js';
@@ -13,7 +14,7 @@ const headers = {
   'Cache-Control': 'no-store',
 };
 const json = (body, status = 200) => Response.json(body, { status, headers });
-async function readJson(request) {
+async function readJson(request, maximum = 8192) {
   const reader = request.body?.getReader();
   if (!reader) throw new Error('Missing body');
   let size = 0;
@@ -22,7 +23,7 @@ async function readJson(request) {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.length;
-    if (size > 8192) { await reader.cancel(); throw new Error('Request too large'); }
+    if (size > maximum) { await reader.cancel(); throw new Error('Request too large'); }
     chunks.push(value);
   }
   const bytes = new Uint8Array(size);
@@ -36,6 +37,19 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers });
     const url = new URL(request.url);
     try {
+      if (url.pathname === '/quiz-scores' && request.method === 'POST') {
+        const result = await saveQuizScore(env.DB, await readJson(request, 131072));
+        return json(result, result.status ?? 200);
+      }
+      if (url.pathname === '/quiz-scores' && request.method === 'GET') {
+        const seconds = Number(url.searchParams.get('seconds'));
+        const difficult = url.searchParams.get('difficult');
+        if (![30, 60, 180].includes(seconds) || !['true', 'false'].includes(difficult))
+          return json({error: 'Invalid recognition mode'}, 400);
+        const unique = url.searchParams.get('unique') !== 'false';
+        const {results} = await env.DB.prepare(quizScoreQuery(unique)).bind(seconds, Number(difficult === 'true')).all();
+        return json({scores: results});
+      }
       if (url.pathname === '/players/name' && request.method === 'POST') {
         const body = await readJson(request);
         if (!validPlayer(body?.player) || !validName(body?.name))

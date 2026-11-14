@@ -246,10 +246,55 @@ class PlayerData {
     ))
       jsonDecode(preferences.getString(key)!) as Map<String, dynamic>,
   ];
+  List<Map<String, dynamic>> get savedQuizScores => [
+    for (final key in preferences.getKeys().where(
+      (k) => k.startsWith('saved-quiz-score:'),
+    ))
+      jsonDecode(preferences.getString(key)!) as Map<String, dynamic>,
+  ];
+
+  List<Map<String, dynamic>> get allSavedScores => [
+    ...savedScores,
+    ...savedQuizScores,
+  ];
+
+  int? quizBest(int seconds, bool difficult) {
+    final scores = savedQuizScores
+        .where((s) => s['seconds'] == seconds && s['difficult'] == difficult)
+        .map((s) => (s['correct'] as int) - (s['mistakes'] as int));
+    return scores.isEmpty ? null : scores.reduce(max);
+  }
+
+  Future<void> queueQuizScore({
+    required String id,
+    required int seconds,
+    required bool difficult,
+    required int correct,
+    required int mistakes,
+    required List<List<Object>> answers,
+  }) async {
+    await _serialize(() async {
+      if (preferences.containsKey('saved-quiz-score:$id')) return;
+      await _saveScore({
+        'game': 'quiz',
+        'id': id,
+        'player': player,
+        'name': nickname,
+        'seconds': seconds,
+        'difficult': difficult,
+        'correct': correct,
+        'mistakes': mistakes,
+        'answers': answers,
+        'status': 'pending',
+      });
+    });
+    onRecordsChanged?.call();
+  }
+
   int get pendingScores =>
-      savedScores.where((s) => s['status'] == 'pending').length;
+      allSavedScores.where((s) => s['status'] == 'pending').length;
   int get rejectedScores =>
-      savedScores.where((s) => s['status'] == 'rejected').length;
+      allSavedScores.where((s) => s['status'] == 'rejected').length;
   Map<String, dynamic>? savedScore(String seed) {
     final raw = preferences.getString('saved-score:$seed');
     return raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
@@ -279,7 +324,9 @@ class PlayerData {
 
   Future<void> _saveScore(Map<String, dynamic> score) async {
     if (!await preferences.setString(
-      'saved-score:${score['seed']}',
+      score['game'] == 'quiz'
+          ? 'saved-quiz-score:${score['id']}'
+          : 'saved-score:${score['seed']}',
       jsonEncode(score),
     )) {
       throw StateError('Could not save this score on your device.');
@@ -374,6 +421,22 @@ class OnlineApi {
     return (response['scores'] as List)
         .map((e) => Score.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> quizScores({
+    required int seconds,
+    required bool difficult,
+    required bool unique,
+  }) async {
+    final response = await request(
+      '/quiz-scores',
+      query: {
+        'seconds': '$seconds',
+        'difficult': '$difficult',
+        'unique': '$unique',
+      },
+    );
+    return (response['scores'] as List).cast<Map<String, dynamic>>();
   }
 
   Future<List<SetTotalScore>> totalSets() async {

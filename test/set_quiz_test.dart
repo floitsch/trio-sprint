@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:trio_sprint/card_view.dart';
 import 'package:trio_sprint/game.dart';
 import 'package:trio_sprint/main.dart';
+import 'package:trio_sprint/data.dart';
+import 'package:trio_sprint/quiz_leaderboard.dart';
 import 'package:trio_sprint/set_quiz.dart';
 
 void main() {
@@ -70,15 +72,69 @@ void main() {
   testWidgets('start screen opens the recognition race', (tester) async {
     await tester.pumpWidget(const TrioSprintApp());
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Is this a set?'));
-    await tester.tap(find.text('Is this a set?'));
+    await tester.ensureVisible(find.text('Yes / No'));
+    await tester.tap(find.text('Yes / No'));
     await tester.pumpAndSettle();
     expect(find.text('Difficult only'), findsOneWidget);
-    expect(find.text('Start race'), findsOneWidget);
-    expect(find.text('1 min'), findsOneWidget);
-    expect(find.text('3 min'), findsOneWidget);
+    expect(find.text('30 s'), findsOneWidget);
+    expect(find.text('1 min'), findsNWidgets(2));
+    expect(find.text('3 min'), findsNWidgets(2));
+    await tester.ensureVisible(find.text('Start run'));
+    await tester.tap(find.text('Start run'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('quiz-countdown')), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
+
+  for (final size in [const Size(320, 480), const Size(740, 360)]) {
+    testWidgets('integrated Yes / No selector and leaderboard fit at $size', (
+      tester,
+    ) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(const TrioSprintApp());
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Yes / No'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Yes / No'));
+      await tester.pumpAndSettle();
+      expect(find.text('30 s'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(
+        MaterialApp(home: QuizLeaderboardScreen(api: QuizTestApi())),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Alice'), findsOneWidget);
+      expect(find.text('7'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
+  testWidgets(
+    'a completed 30-second race persists its personal best and upload payload',
+    (tester) async {
+      final player = await PlayerData.load();
+      await tester.pumpWidget(MaterialApp(home: SetQuizScreen(player: player)));
+      await startRace(tester);
+      final current = cards(tester);
+      await tester.tap(find.text(isSet(current) ? 'Yes' : 'No'));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pump();
+      final restored = await PlayerData.load();
+      expect(restored.quizBest(30, false), 1);
+      expect(restored.pendingScores, 1);
+      expect(restored.savedQuizScores.single['answers'], [
+        [...current.map((c) => c.id), isSet(current)],
+      ]);
+      expect(find.text('New personal best!'), findsOneWidget);
+      expect(find.text('30 s'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   for (final size in [const Size(320, 480), const Size(740, 360)]) {
     testWidgets('race advances immediately with distinct haptics at $size', (
@@ -151,7 +207,7 @@ void main() {
       final lateAnswer = tester
           .widget<FilledButton>(find.widgetWithText(FilledButton, 'Yes'))
           .onPressed!;
-      await tester.pump(const Duration(minutes: 1));
+      await tester.pump(const Duration(seconds: 30));
       expect(find.text('Time’s up.'), findsOneWidget);
       expect(find.text('2 correct · 2 wrong'), findsOneWidget);
       expect(find.byType(CardView), findsNothing);
@@ -202,6 +258,35 @@ void main() {
     },
   );
 
+  testWidgets(
+    'recognition leaderboard loads and filters duration, difficulty and player best',
+    (tester) async {
+      final api = QuizTestApi();
+      await tester.pumpWidget(
+        MaterialApp(home: QuizLeaderboardScreen(api: api)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Alice'), findsOneWidget);
+      expect(find.text('7'), findsOneWidget);
+      expect(api.queries.last, {
+        'seconds': '30',
+        'difficult': 'false',
+        'unique': 'true',
+      });
+      await tester.tap(find.text('3 min'));
+      await tester.pumpAndSettle();
+      expect(api.queries.last['seconds'], '180');
+      await tester.tap(find.text('Difficult only'));
+      await tester.pumpAndSettle();
+      expect(api.queries.last['difficult'], 'true');
+      await tester.tap(find.text('Only each player’s best'));
+      await tester.pumpAndSettle();
+      expect(api.queries.last['unique'], 'false');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   testWidgets('leaving during countdown cancels pending timers', (
     tester,
   ) async {
@@ -212,4 +297,22 @@ void main() {
     await tester.pump(const Duration(minutes: 4));
     expect(tester.takeException(), isNull);
   });
+}
+
+class QuizTestApi extends OnlineApi {
+  final queries = <Map<String, String>>[];
+  @override
+  Future<Map<String, dynamic>> request(
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, String>? query,
+  }) async {
+    if (path != '/quiz-scores') throw StateError(path);
+    queries.add(query!);
+    return {
+      'scores': [
+        {'name': 'Alice', 'score': 7, 'correct': 9, 'mistakes': 2},
+      ],
+    };
+  }
 }

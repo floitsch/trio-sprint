@@ -97,13 +97,21 @@ Leaving the app does not pause the stopwatch.
   the background does not affect this practice ranking or pause a sprint score.
 - **Is this a set?** shows three random, distinct cards and asks for Yes or No.
   Each question first chooses its answer with equal probability, then generates
-  matching cards. Choose a **1 min** or **3 min** race, starting after a two-second
+  matching cards. Select **Yes / No** in the main mode row, then choose a **30 s**,
+  **1 min** or **3 min** race, starting after a two-second
   countdown. Each answer immediately deals a new trio: correct answers give a
   short haptic click and earn 1 point; wrong answers give a stronger haptic and
   lose 1 point. The clock keeps running in the background. Results show your
   score and correct/wrong counts. **Difficult only** limits both
   valid and invalid trios to at most one property shared by all three cards.
-  This mode works offline.
+  Each duration and difficulty has its own personal best and top-100 high scores.
+  Scores rank by correct minus wrong, with fewer mistakes breaking ties. Set a
+  nickname to publish; the existing device-linking and best-per-player filter
+  also apply. Completed races with at least one answer save locally before
+  upload and retry automatically, including after offline play or a lost reply.
+  The server checks each answer and calculates the score. As with solo sprint
+  times, the elapsed race time is trusted. Recognition answers are kept separate
+  from solved-board statistics and Total sets.
 - **Statistics:** every new board attempt is saved locally with its layout,
   actual solution when solved, active viewing time, mistakes, assistance, mode,
   timestamp and outcome. Statistics shows solved counts, median unassisted

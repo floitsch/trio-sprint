@@ -6,9 +6,22 @@ import 'package:flutter/services.dart';
 
 import 'card_board.dart';
 import 'game.dart';
+import 'data.dart';
+import 'leaderboard.dart';
+import 'quiz_leaderboard.dart';
 
 class SetQuizScreen extends StatefulWidget {
-  const SetQuizScreen({super.key});
+  const SetQuizScreen({
+    super.key,
+    this.player,
+    this.seconds = 30,
+    this.difficult = false,
+    this.autoStart = false,
+  });
+  final PlayerData? player;
+  final int seconds;
+  final bool difficult;
+  final bool autoStart;
 
   @override
   State<SetQuizScreen> createState() => _SetQuizScreenState();
@@ -18,8 +31,8 @@ enum _RacePhase { setup, countdown, playing, finished }
 
 class _SetQuizScreenState extends State<SetQuizScreen>
     with WidgetsBindingObserver {
-  bool difficultOnly = false;
-  Duration limit = const Duration(minutes: 1);
+  late bool difficultOnly = widget.difficult;
+  late Duration limit = Duration(seconds: widget.seconds);
   _RacePhase phase = _RacePhase.setup;
   SetQuizExercise? exercise;
   int correct = 0;
@@ -32,6 +45,45 @@ class _SetQuizScreenState extends State<SetQuizScreen>
   Timer? deadline;
   Timer? resultsLock;
   bool resultsLocked = false;
+  String runId = '';
+  final answers = <List<Object>>[];
+  bool saving = false;
+  bool saveFailed = false;
+  int? previousBest;
+
+  Future<void> highScores() => Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => QuizLeaderboardScreen(
+        player: widget.player,
+        seconds: limit.inSeconds,
+        difficult: difficultOnly,
+      ),
+    ),
+  );
+
+  Future<void> saveResult() async {
+    final player = widget.player;
+    if (player == null || answers.isEmpty) return;
+    setState(() {
+      saving = true;
+      saveFailed = false;
+    });
+    try {
+      await player.queueQuizScore(
+        id: runId,
+        seconds: limit.inSeconds,
+        difficult: difficultOnly,
+        correct: correct,
+        mistakes: mistakes,
+        answers: List.of(answers),
+      );
+    } catch (_) {
+      if (mounted) setState(() => saveFailed = true);
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
 
   int get score => correct - mistakes;
 
@@ -39,6 +91,11 @@ class _SetQuizScreenState extends State<SetQuizScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (widget.autoStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) start();
+      });
+    }
   }
 
   void stopTimers() {
@@ -52,6 +109,9 @@ class _SetQuizScreenState extends State<SetQuizScreen>
   void start() {
     stopTimers();
     watch.reset();
+    runId = randomId();
+    answers.clear();
+    previousBest = widget.player?.quizBest(limit.inSeconds, difficultOnly);
     setState(() {
       phase = _RacePhase.countdown;
       countdown = 2;
@@ -60,6 +120,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
       remaining = limit;
       exercise = null;
       resultsLocked = false;
+      saveFailed = false;
     });
     countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (countdown > 1) {
@@ -98,6 +159,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
       exercise = null;
       resultsLocked = true;
     });
+    unawaited(saveResult());
     resultsLock = Timer(const Duration(seconds: 1), () {
       if (mounted) setState(() => resultsLocked = false);
     });
@@ -110,6 +172,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
       finish();
       return;
     }
+    answers.add([...exercise!.cards.map((card) => card.id), value]);
     final right = value == exercise!.answer;
     if (right) {
       HapticFeedback.selectionClick();
@@ -152,6 +215,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
       const SizedBox(height: 16),
       SegmentedButton<Duration>(
         segments: const [
+          ButtonSegment(value: Duration(seconds: 30), label: Text('30 s')),
           ButtonSegment(value: Duration(minutes: 1), label: Text('1 min')),
           ButtonSegment(value: Duration(minutes: 3), label: Text('3 min')),
         ],
@@ -170,6 +234,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
       ),
       const SizedBox(height: 16),
       FilledButton(onPressed: start, child: const Text('Start race')),
+      TextButton(onPressed: highScores, child: const Text('High scores')),
     ],
   );
 
@@ -231,14 +296,50 @@ class _SetQuizScreenState extends State<SetQuizScreen>
       Text('Score: $score', style: Theme.of(context).textTheme.headlineLarge),
       const SizedBox(height: 8),
       Text('$correct correct · $mistakes wrong'),
-      Text('${limit.inMinutes} min${difficultOnly ? ' · Difficult only' : ''}'),
+      Text(
+        '${quizDurationLabel(limit.inSeconds)}${difficultOnly ? ' · Difficult only' : ''}',
+      ),
+      if (previousBest != null) Text('Previous personal best: $previousBest'),
+      if (answers.isNotEmpty &&
+          (previousBest == null || score > previousBest!) &&
+          !saveFailed &&
+          !saving &&
+          widget.player != null)
+        const Text('New personal best!'),
+      if (saving)
+        const Text('Saving score…')
+      else if (saveFailed) ...[
+        const Text('Could not save this score.'),
+        TextButton(onPressed: saveResult, child: const Text('Retry saving')),
+      ] else if (answers.isEmpty)
+        const Text('Answer at least one trio to enter the high scores.')
+      else if (widget.player == null)
+        const Text('Device storage is unavailable; this score cannot be saved.')
+      else
+        const Text(
+          'Saved on this device. Scores sync automatically when online.',
+        ),
+      if (answers.isNotEmpty &&
+          widget.player != null &&
+          widget.player!.nickname.isEmpty)
+        TextButton(
+          onPressed: () async {
+            await editNickname(context, widget.player!);
+            if (mounted) setState(() {});
+          },
+          child: const Text('Set nickname'),
+        ),
+      TextButton(
+        onPressed: resultsLocked ? null : highScores,
+        child: const Text('High scores'),
+      ),
       const SizedBox(height: 24),
       FilledButton(
-        onPressed: resultsLocked ? null : start,
+        onPressed: resultsLocked || saving ? null : start,
         child: const Text('Race again'),
       ),
       TextButton(
-        onPressed: resultsLocked
+        onPressed: resultsLocked || saving
             ? null
             : () => setState(() => phase = _RacePhase.setup),
         child: const Text('Change settings'),

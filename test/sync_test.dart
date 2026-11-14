@@ -15,6 +15,7 @@ class FakeApi extends OnlineApi {
   bool loseResponse = false;
   final uploadedScores = <String, Map<String, dynamic>>{};
   final attempts = <String, Map<String, dynamic>>{};
+  final uploadedQuizScores = <String, Map<String, dynamic>>{};
   final names = <String, String>{};
   final rejected = <String>{};
   final calls = <String>[];
@@ -38,6 +39,11 @@ class FakeApi extends OnlineApi {
         throw const ApiException(409, 'Seed already submitted');
       }
       uploadedScores.putIfAbsent(body['seed'] as String, () => body);
+    } else if (path == '/quiz-scores') {
+      if (rejected.contains(body!['id'])) {
+        throw const ApiException(409, 'Race already submitted');
+      }
+      uploadedQuizScores.putIfAbsent(body['id'] as String, () => body);
     } else if (path == '/attempts') {
       for (final attempt in body!['attempts'] as List) {
         attempts.putIfAbsent(
@@ -85,6 +91,84 @@ void main() {
       solutions: solutions,
     );
   }
+
+  test('recognition scores and personal bests survive reopen, wait for a nickname and retry lost acknowledgements', () async {
+    final player = await PlayerData.load();
+    Future<void> queue(
+      String id,
+      int seconds,
+      bool difficult,
+      int correct,
+      int mistakes,
+    ) => player.queueQuizScore(
+      id: id,
+      seconds: seconds,
+      difficult: difficult,
+      correct: correct,
+      mistakes: mistakes,
+      answers: [
+        [0, 40, 80, true],
+      ],
+    );
+    await queue('a' * 48, 30, false, 4, 2);
+    await queue('b' * 48, 60, false, 10, 0);
+    await queue('c' * 48, 30, true, 20, 0);
+    expect(player.quizBest(30, false), 2);
+    expect(player.quizBest(60, false), 10);
+    expect(player.quizBest(30, true), 20);
+    expect(player.quizBest(180, false), isNull);
+    expect(player.savedScores, isEmpty);
+    final restored = await PlayerData.load();
+    expect(restored.quizBest(30, false), 2);
+    final api = FakeApi();
+    final sync = SyncService(restored, api: api);
+    await sync.sync();
+    expect(api.uploadedQuizScores, isEmpty);
+    expect(restored.pendingScores, 3);
+    await restored.setNickname('Quiz player');
+    api.loseResponse = true;
+    await sync.sync();
+    expect(restored.pendingScores, 3);
+    expect(api.uploadedQuizScores, hasLength(1));
+    sync.dispose();
+    final reloaded = await PlayerData.load();
+    api.loseResponse = false;
+    final retry = SyncService(reloaded, api: api);
+    await retry.sync();
+    expect(reloaded.pendingScores, 0);
+    expect(api.uploadedQuizScores, hasLength(3));
+    expect(
+      api.uploadedQuizScores.values.every(
+        (s) => s['name'] == 'Quiz player' && !s.containsKey('game'),
+      ),
+      isTrue,
+    );
+    retry.dispose();
+  });
+
+  test('a rejected recognition score does not block later scores', () async {
+    final player = await PlayerData.load();
+    await player.setNickname('Quiz');
+    for (final id in ['a', 'b']) {
+      await player.queueQuizScore(
+        id: id * 48,
+        seconds: 30,
+        difficult: false,
+        correct: 1,
+        mistakes: 0,
+        answers: [
+          [0, 40, 80, true],
+        ],
+      );
+    }
+    final api = FakeApi()..rejected.add('a' * 48);
+    final sync = SyncService(player, api: api);
+    await sync.sync();
+    expect(player.pendingScores, 0);
+    expect(player.rejectedScores, 1);
+    expect(api.uploadedQuizScores.keys, ['b' * 48]);
+    sync.dispose();
+  });
 
   test(
     'offline runs survive reopen and upload once with their original nickname',

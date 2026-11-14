@@ -20,6 +20,7 @@ import 'practice.dart';
 import 'run_history.dart';
 import 'run_timeline.dart';
 import 'set_quiz.dart';
+import 'quiz_leaderboard.dart';
 
 void main() => runApp(const TrioSprintApp());
 
@@ -89,6 +90,27 @@ class _GameScreenState extends State<GameScreen> {
   final boardClock = BoardClock();
   int boardMistakes = 0;
   RunMode mode = RunMode.sprint;
+  bool quizMode = false;
+  int quizSeconds = 30;
+  bool quizDifficult = false;
+
+  Future<void> startQuiz() async {
+    await loading;
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SetQuizScreen(
+          player: player,
+          seconds: quizSeconds,
+          difficult: quizDifficult,
+          autoStart: true,
+        ),
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
   bool updateReady = false;
   // When the last set of a timed run was found.
   Duration lastSet = Duration.zero;
@@ -249,6 +271,19 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   Future<void> openLeaderboard({String? seed}) async {
+    if (quizMode && seed == null) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => QuizLeaderboardScreen(
+            player: player,
+            seconds: quizSeconds,
+            difficult: quizDifficult,
+          ),
+        ),
+      );
+      return;
+    }
     final chosen = await Navigator.push<String>(
       context,
       MaterialPageRoute(
@@ -786,7 +821,9 @@ class _GameScreenState extends State<GameScreen> {
     FittedBox(
       fit: BoxFit.scaleDown,
       child: Text(
-        mode.timed
+        quizMode
+            ? 'Three cards.\nYes or no.'
+            : mode.timed
             ? '${mode.label}.\nEvery set counts.'
             : 'Five sets.\nOne good run.',
         textAlign: TextAlign.center,
@@ -800,7 +837,9 @@ class _GameScreenState extends State<GameScreen> {
     ),
     const SizedBox(height: 24),
     Text(
-      mode.timed
+      quizMode
+          ? 'Decide if the trio is a set.\nCorrect +1 · wrong −1.'
+          : mode.timed
           ? 'Find as many sets as you can\nbefore the clock runs out.'
           : 'Find five sets in a row.\nSee how fast your eyes can go.',
       textAlign: TextAlign.center,
@@ -828,28 +867,61 @@ class _GameScreenState extends State<GameScreen> {
       ),
     ),
     const SizedBox(height: 24),
-    SegmentedButton<RunMode>(
+    SegmentedButton<String>(
+      style: const ButtonStyle(
+        padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 10)),
+      ),
       showSelectedIcon: false,
       segments: [
         for (final mode in RunMode.values)
-          ButtonSegment(value: mode, label: Text(mode.shortLabel)),
+          ButtonSegment(value: mode.prefix, label: Text(mode.shortLabel)),
+        const ButtonSegment(value: 'quiz', label: Text('Yes / No')),
       ],
-      selected: {mode},
+      selected: {quizMode ? 'quiz' : mode.prefix},
       onSelectionChanged: (selection) {
-        final chosen = selection.single;
         setState(() {
-          mode = chosen;
-          // A pending seed belongs to one mode.
-          if (pendingSeed != null && RunMode.of(pendingSeed!) != chosen) {
-            pendingSeed = null;
+          quizMode = selection.single == 'quiz';
+          if (!quizMode) {
+            mode = RunMode.values.firstWhere(
+              (m) => m.prefix == selection.single,
+            );
+            if (pendingSeed != null && RunMode.of(pendingSeed!) != mode) {
+              pendingSeed = null;
+            }
           }
         });
-        player?.setMode(chosen).catchError((Object _) {});
+        if (!quizMode) player?.setMode(mode).catchError((Object _) {});
       },
     ),
+    if (quizMode) ...[
+      const SizedBox(height: 12),
+      SegmentedButton<int>(
+        segments: [
+          for (final seconds in [30, 60, 180])
+            ButtonSegment(
+              value: seconds,
+              label: Text(quizDurationLabel(seconds)),
+            ),
+        ],
+        selected: {quizSeconds},
+        onSelectionChanged: (value) =>
+            setState(() => quizSeconds = value.single),
+      ),
+      SizedBox(
+        width: 350,
+        child: CheckboxListTile(
+          title: const Text('Difficult only'),
+          subtitle: const Text('At most one property all the same.'),
+          value: quizDifficult,
+          onChanged: (value) => setState(() => quizDifficult = value!),
+        ),
+      ),
+      if (player?.quizBest(quizSeconds, quizDifficult) case final best?)
+        Text('Personal best: $best'),
+    ],
     const SizedBox(height: 12),
     FilledButton.icon(
-      onPressed: start,
+      onPressed: quizMode ? startQuiz : start,
       iconAlignment: IconAlignment.end,
       icon: const Icon(Icons.arrow_forward_rounded),
       label: const Text('Start run'),
@@ -864,15 +936,17 @@ class _GameScreenState extends State<GameScreen> {
       alignment: WrapAlignment.center,
       spacing: 8,
       children: [
-        TextButton(onPressed: enterSeed, child: const Text('Run a seed')),
-        TextButton(
-          onPressed: () async {
-            final seed = pendingSeed ?? newSeed(mode);
-            setState(() => pendingSeed = seed);
-            await copySeed(seed);
-          },
-          child: const Text('Share a seed'),
-        ),
+        if (!quizMode)
+          TextButton(onPressed: enterSeed, child: const Text('Run a seed')),
+        if (!quizMode)
+          TextButton(
+            onPressed: () async {
+              final seed = pendingSeed ?? newSeed(mode);
+              setState(() => pendingSeed = seed);
+              await copySeed(seed);
+            },
+            child: const Text('Share a seed'),
+          ),
         TextButton(
           onPressed: openLeaderboard,
           child: const Text('High scores'),
@@ -883,13 +957,6 @@ class _GameScreenState extends State<GameScreen> {
             MaterialPageRoute(builder: (_) => TrainingScreen(player: player)),
           ),
           child: const Text('Training'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const SetQuizScreen()),
-          ),
-          child: const Text('Is this a set?'),
         ),
         TextButton(onPressed: () => openRace(), child: const Text('1 vs 1')),
         TextButton(

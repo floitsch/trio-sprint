@@ -48,7 +48,7 @@ class SyncScreen extends StatelessWidget {
               const ListTile(title: Text('Nickname update waiting to upload')),
             if (player.nickname.isEmpty) ...[
               const Text(
-                'Add a nickname to publish saved first-attempt scores and appear in Total sets. Your board history can sync without one.',
+                'Add a nickname to publish saved scores and appear in Total sets. Your board history can sync without one.',
               ),
               TextButton(
                 onPressed: () async {
@@ -72,11 +72,13 @@ class SyncScreen extends StatelessWidget {
                 !player.nicknameNeedsSync)
               const Text('Nothing waiting to upload.'),
             if (sync.busy) const Text('Syncing…'),
-            for (final score in player.savedScores.where(
+            for (final score in player.allSavedScores.where(
               (s) => s['status'] == 'rejected',
             ))
               ListTile(
-                title: Text('Score not accepted: ${score['seed']}'),
+                title: Text(
+                  'Score not accepted: ${score['seed'] ?? 'Yes / No race'}',
+                ),
                 subtitle: Text(
                   '${score['error']}\nThe original score is still saved on this device.',
                 ),
