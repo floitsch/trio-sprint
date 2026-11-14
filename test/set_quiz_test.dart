@@ -1,4 +1,5 @@
 // Copyright (C) 2026 Florian Loitsch.
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -11,6 +12,8 @@ import 'package:trio_sprint/main.dart';
 import 'package:trio_sprint/data.dart';
 import 'package:trio_sprint/quiz_leaderboard.dart';
 import 'package:trio_sprint/set_quiz.dart';
+import 'package:trio_sprint/sync.dart';
+import 'package:trio_sprint/practice.dart';
 
 void main() {
   for (final difficult in [false, true]) {
@@ -84,6 +87,119 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('quiz-countdown')), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'results change from uploading to submitted as soon as this score is acknowledged',
+    (tester) async {
+      final player = await PlayerData.load();
+      await player.setNickname('Flo');
+      final api = QuizSyncTestApi();
+      final sync = SyncService(player, api: api)..start();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SetQuizScreen(player: player, sync: sync),
+        ),
+      );
+      await startRace(tester);
+      await tester.tap(find.text(isSet(cards(tester)) ? 'Yes' : 'No'));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pump();
+      expect(find.text('Uploading score…'), findsOneWidget);
+      expect(find.textContaining('Score submitted as'), findsNothing);
+      // Keep an unrelated history upload pending after the score is accepted.
+      await player.recordPractice(
+        PracticeBoard(cards: List.generate(12, (i) => i), source: 'training'),
+      );
+      api.scoreGate.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(sync.busy, isTrue);
+      expect(find.text('Score submitted as Flo.'), findsOneWidget);
+      expect(find.text('Uploading score…'), findsNothing);
+      expect(
+        find.text(
+          'Saved on this device. Scores sync automatically when online.',
+        ),
+        findsNothing,
+      );
+      api.historyGate.complete();
+      await tester.pump();
+      await tester.pumpWidget(const SizedBox());
+      sync.dispose();
+    },
+  );
+
+  for (final rejected in [false, true]) {
+    testWidgets(
+      'results display ${rejected ? 'rejection' : 'pending upload and successful retry'}',
+      (tester) async {
+        final player = await PlayerData.load();
+        await player.setNickname('Flo');
+        final api = QuizSyncTestApi()
+          ..failure = rejected
+              ? const ApiException(400, 'Invalid answers')
+              : Exception('Network unavailable');
+        api.scoreGate.complete();
+        final sync = SyncService(player, api: api)..start();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: SetQuizScreen(player: player, sync: sync),
+          ),
+        );
+        await startRace(tester);
+        await tester.tap(find.text(isSet(cards(tester)) ? 'Yes' : 'No'));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 30));
+        await tester.pump();
+        if (rejected) {
+          expect(
+            find.text('Score not accepted: Invalid answers'),
+            findsOneWidget,
+          );
+        } else {
+          expect(
+            find.text(
+              'Upload pending. Saved on this device; retrying automatically.',
+            ),
+            findsOneWidget,
+          );
+          api.failure = null;
+          await sync.sync();
+          await tester.pump();
+          expect(find.text('Score submitted as Flo.'), findsOneWidget);
+        }
+        await tester.pumpWidget(const SizedBox());
+        sync.dispose();
+      },
+    );
+  }
+
+  testWidgets('unnamed score explains the nickname requirement while online', (
+    tester,
+  ) async {
+    final player = await PlayerData.load();
+    final api = QuizSyncTestApi();
+    final sync = SyncService(player, api: api)..start();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SetQuizScreen(player: player, sync: sync),
+      ),
+    );
+    await startRace(tester);
+    await tester.tap(find.text(isSet(cards(tester)) ? 'Yes' : 'No'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pump();
+    expect(
+      find.text('Saved on this device. Add a nickname to publish your score.'),
+      findsOneWidget,
+    );
+    expect(find.text('Set nickname'), findsOneWidget);
+    expect(api.scoreGate.isCompleted, isFalse);
+    await tester.pumpWidget(const SizedBox());
+    sync.dispose();
   });
 
   for (final size in [const Size(320, 480), const Size(740, 360)]) {
@@ -314,5 +430,29 @@ class QuizTestApi extends OnlineApi {
         {'name': 'Alice', 'score': 7, 'correct': 9, 'mistakes': 2},
       ],
     };
+  }
+}
+
+class QuizSyncTestApi extends OnlineApi {
+  final scoreGate = Completer<void>();
+  final historyGate = Completer<void>();
+  Object? failure;
+
+  @override
+  bool get configured => true;
+
+  @override
+  Future<Map<String, dynamic>> request(
+    String path, {
+    Map<String, dynamic>? body,
+    Map<String, String>? query,
+  }) async {
+    if (path == '/quiz-scores') {
+      await scoreGate.future;
+      if (failure != null) throw failure!;
+    } else if (path == '/attempts') {
+      await historyGate.future;
+    }
+    return {'ok': true};
   }
 }

@@ -9,16 +9,19 @@ import 'game.dart';
 import 'data.dart';
 import 'leaderboard.dart';
 import 'quiz_leaderboard.dart';
+import 'sync.dart';
 
 class SetQuizScreen extends StatefulWidget {
   const SetQuizScreen({
     super.key,
     this.player,
+    this.sync,
     this.seconds = 30,
     this.difficult = false,
     this.autoStart = false,
   });
   final PlayerData? player;
+  final SyncService? sync;
   final int seconds;
   final bool difficult;
   final bool autoStart;
@@ -288,6 +291,29 @@ class _SetQuizScreenState extends State<SetQuizScreen>
     ],
   );
 
+  String get scoreSyncStatus {
+    final saved = widget.player?.savedQuizScore(runId);
+    if (saved?['status'] == 'synced') {
+      return 'Score submitted as ${saved!['name']}.';
+    }
+    if (saved?['status'] == 'rejected') {
+      return 'Score not accepted: ${saved!['error']}';
+    }
+    if ((saved?['name'] as String? ?? '').isEmpty &&
+        widget.player!.nickname.isEmpty) {
+      return 'Saved on this device. Add a nickname to publish your score.';
+    }
+    final sync = widget.sync;
+    if (sync != null && !sync.api.configured) {
+      return 'Saved on this device. Online scores are not configured in this build.';
+    }
+    if (sync?.busy == true) return 'Uploading score…';
+    if (sync?.error != null) {
+      return 'Upload pending. Saved on this device; retrying automatically.';
+    }
+    return 'Saved on this device. Upload pending.';
+  }
+
   Widget results() => ListView(
     padding: const EdgeInsets.all(22),
     children: [
@@ -316,9 +342,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
       else if (widget.player == null)
         const Text('Device storage is unavailable; this score cannot be saved.')
       else
-        const Text(
-          'Saved on this device. Scores sync automatically when online.',
-        ),
+        Semantics(liveRegion: true, child: Text(scoreSyncStatus)),
       if (answers.isNotEmpty &&
           widget.player != null &&
           widget.player!.nickname.isEmpty)
@@ -364,7 +388,13 @@ class _SetQuizScreenState extends State<SetQuizScreen>
               ),
             ),
             _RacePhase.playing => playing(),
-            _RacePhase.finished => results(),
+            _RacePhase.finished =>
+              widget.sync == null
+                  ? results()
+                  : ListenableBuilder(
+                      listenable: widget.sync!,
+                      builder: (context, _) => results(),
+                    ),
           },
         ),
       ),

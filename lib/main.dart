@@ -102,6 +102,7 @@ class _GameScreenState extends State<GameScreen> {
       MaterialPageRoute(
         builder: (_) => SetQuizScreen(
           player: player,
+          sync: syncService,
           seconds: quizSeconds,
           difficult: quizDifficult,
           autoStart: true,

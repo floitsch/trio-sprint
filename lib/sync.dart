@@ -82,6 +82,7 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
               probablyOffline = false;
               score['status'] = 'synced';
               await player.updateSavedScore(score);
+              if (!_disposed) notifyListeners();
             } on ApiException catch (failure) {
               probablyOffline = false;
               if (failure.status != 400 && failure.status != 409) rethrow;
@@ -90,6 +91,7 @@ class SyncService extends ChangeNotifier with WidgetsBindingObserver {
               score['status'] = 'rejected';
               score['error'] = failure.message;
               await player.updateSavedScore(score);
+              if (!_disposed) notifyListeners();
             }
             continue;
           }

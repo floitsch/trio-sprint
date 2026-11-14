@@ -265,6 +265,11 @@ class PlayerData {
     return scores.isEmpty ? null : scores.reduce(max);
   }
 
+  Map<String, dynamic>? savedQuizScore(String id) {
+    final raw = preferences.getString('saved-quiz-score:$id');
+    return raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
+  }
+
   Future<void> queueQuizScore({
     required String id,
     required int seconds,
