@@ -22,6 +22,9 @@ import 'run_timeline.dart';
 import 'set_quiz.dart';
 import 'quiz_leaderboard.dart';
 import 'quiz_seed.dart';
+import 'run_session.dart';
+import 'run_scores.dart';
+import 'run_ui.dart';
 
 void main() => runApp(const TrioSprintApp());
 
@@ -58,8 +61,6 @@ class TrioSprintApp extends StatelessWidget {
   );
 }
 
-enum Phase { ready, countdown, playing, finished }
-
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key, this.stopwatch});
   final Stopwatch? stopwatch;
@@ -85,7 +86,8 @@ class _GameScreenState extends State<GameScreen> {
     if (mounted) setState(() {});
   }
 
-  bool submitting = false;
+  final submission = RunScoreSubmission();
+  bool get submitting => submission.busy;
   final solutions = <List<int>>[];
   final setTimes = <Duration>[];
   final runBoards = <PracticeBoard>[];
@@ -100,31 +102,25 @@ class _GameScreenState extends State<GameScreen> {
       : Duration(microseconds: (chaseTarget!.inMicroseconds * 6 + 4) ~/ 5);
 
   void reachRunLimit() {
-    if (phase != Phase.playing || starting) return;
+    if (phase != RunPhase.playing || starting) return;
     if (game.mode.timed) {
       endTimedRun();
-    } else if (chaseTarget != null &&
-        !{
-          AppLifecycleState.inactive,
-          AppLifecycleState.paused,
-          AppLifecycleState.hidden,
-          AppLifecycleState.detached,
-        }.contains(WidgetsBinding.instance.lifecycleState)) {
+    } else if (chaseTarget != null) {
       unawaited(start());
     }
   }
 
-  void stopChase() {
+  void stopChase() => cancelRun();
+
+  void cancelRun({AttemptOutcome outcome = AttemptOutcome.interrupted}) {
     runGeneration++;
     starting = false;
     stopClocks();
-    rememberBoard(outcome: AttemptOutcome.interrupted);
+    rememberBoard(outcome: outcome);
     rememberRun(completed: false);
     boardClock.stop();
-    setState(() {
-      chaseTarget = null;
-      phase = Phase.ready;
-    });
+    chaseTarget = null;
+    session.reset();
   }
 
   Future<void> continueChase(Future<void> saved, int generation) async {
@@ -132,14 +128,12 @@ class _GameScreenState extends State<GameScreen> {
     if (!mounted ||
         generation != runGeneration ||
         chaseTarget == null ||
-        phase != Phase.countdown) {
+        phase != RunPhase.countdown) {
       return;
     }
     if (currentSavedScore == null) {
-      setState(() {
-        chaseTarget = null;
-        phase = Phase.finished;
-      });
+      chaseTarget = null;
+      session.finish();
       return;
     }
     await start();
@@ -228,6 +222,8 @@ class _GameScreenState extends State<GameScreen> {
   @override
   void initState() {
     super.initState();
+    session.addListener(syncChanged);
+    submission.addListener(syncChanged);
     pendingSeed = normalizeSeed(Uri.base.queryParameters['seed'] ?? '');
     if (pendingSeed != null) mode = RunMode.of(pendingSeed!);
     loading = loadPlayer();
@@ -298,36 +294,10 @@ class _GameScreenState extends State<GameScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
-  Future<void> copySeed(String seed) async {
-    await Clipboard.setData(ClipboardData(text: shareLink('seed', seed)));
-    if (mounted) message('Seed link copied: $seed');
-  }
+  Future<void> copySeed(String seed) => copyRunSeedLink(context, seed);
 
   Future<void> enterSeed() async {
-    final controller = TextEditingController(text: pendingSeed ?? '');
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Run a seed'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 's2-1234abcd or a shared link',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Run seed'),
-          ),
-        ],
-      ),
-    );
+    final result = await enterRunSeed(context, initial: pendingSeed ?? '');
     if (!mounted || result == null) return;
     final quiz = QuizSeed.parse(result);
     if (quiz != null) {
@@ -409,8 +379,7 @@ class _GameScreenState extends State<GameScreen> {
         : watch.elapsedMilliseconds;
     final mistakes = game.mistakes;
     final solved = solutions.map((trio) => List<int>.from(trio)).toList();
-    setState(() => submitting = true);
-    try {
+    final saved = await submission.save(() async {
       await player!.queueScore(
         seed: seed,
         milliseconds: milliseconds,
@@ -419,10 +388,9 @@ class _GameScreenState extends State<GameScreen> {
       );
       if (!automatic && player!.nickname.isEmpty && mounted) await askName();
       unawaited(syncService?.sync() ?? Future.value());
-    } catch (error) {
-      if (mounted) message('Could not save this score. Please retry: $error');
-    } finally {
-      if (mounted) setState(() => submitting = false);
+    });
+    if (!saved && mounted) {
+      message('Could not save this score. Please retry: ${submission.error}');
     }
   }
 
@@ -452,15 +420,12 @@ class _GameScreenState extends State<GameScreen> {
     ),
   );
 
-  late final watch = widget.stopwatch ?? Stopwatch();
-  final elapsed = ValueNotifier(Duration.zero);
-  Timer? ticker;
-  Timer? countdownTimer;
-  Timer? deadline;
-  Timer? resultsInputLockTimer;
-  bool resultsInputLocked = false;
-  Phase phase = Phase.ready;
-  int countdown = 2;
+  late final session = RunSession(stopwatch: widget.stopwatch);
+  Stopwatch get watch => session.watch;
+  ValueNotifier<Duration> get elapsed => session.elapsed;
+  RunPhase get phase => session.phase;
+  int get countdown => session.countdown;
+  bool get resultsInputLocked => session.resultsLocked;
   Duration? best;
   TimedScore? timedBest;
   bool newBest = false;
@@ -468,19 +433,12 @@ class _GameScreenState extends State<GameScreen> {
   /// Timed runs without a set have nothing to enter into the high scores.
   bool get canSubmit => eligible && (!game.mode.timed || game.streak > 0);
 
-  void stopClocks() {
-    ticker?.cancel();
-    countdownTimer?.cancel();
-    deadline?.cancel();
-    watch.stop();
-  }
+  void stopClocks() => session.stop();
 
   String feedback = 'Find a set. Find your rhythm.';
 
   Future<void> start({String? seed}) async {
     if (starting || submitting) return;
-    resultsInputLockTimer?.cancel();
-    resultsInputLocked = false;
     starting = true;
     final generation = ++runGeneration;
     rememberBoard(outcome: AttemptOutcome.restarted);
@@ -536,8 +494,6 @@ class _GameScreenState extends State<GameScreen> {
     runBoards.clear();
     lastSet = Duration.zero;
     stopClocks();
-    watch.reset();
-    elapsed.value = Duration.zero;
     setState(() {
       game = SetGame(seed: chosenSeed);
       runId = randomId();
@@ -555,75 +511,44 @@ class _GameScreenState extends State<GameScreen> {
               best! > Duration.zero
           ? best
           : null;
-      countdown = 2;
-      phase = Phase.countdown;
       feedback = 'Pick three cards that make a set.';
     });
-    countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (countdown == 2) {
-        setState(() => countdown = 1);
-      } else {
-        timer.cancel();
-        watch.start();
-        boardClock.start();
-        setState(() => phase = Phase.playing);
-        final limit = game.mode.limit ?? chaseLimit;
-        if (limit != null) deadline = Timer(limit, reachRunLimit);
-        ticker = Timer.periodic(const Duration(milliseconds: 33), (_) {
-          elapsed.value = watch.elapsed;
-          // Timers may be late while the app is in the background.
-          if (limit != null && watch.elapsed >= limit) reachRunLimit();
-        });
-      }
-    });
+    session.start(
+      limit: game.mode.limit ?? chaseLimit,
+      onPlaying: boardClock.start,
+      onLimit: reachRunLimit,
+      canExpire: () =>
+          chaseTarget == null ||
+          !{
+            AppLifecycleState.inactive,
+            AppLifecycleState.paused,
+            AppLifecycleState.hidden,
+            AppLifecycleState.detached,
+          }.contains(WidgetsBinding.instance.lifecycleState),
+    );
   }
 
   Future<void> abandon() async {
-    AttemptOutcome outcome = AttemptOutcome.interrupted;
-    if (phase == Phase.playing) {
-      final choice = await showDialog<AttemptOutcome>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Why stop this run?'),
-          content: const Text(
-            'Interrupted boards are excluded from difficult-card training. Too slow keeps this board for training, as Restart does.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Keep playing'),
-            ),
-            TextButton(
-              onPressed: () =>
-                  Navigator.pop(context, AttemptOutcome.interrupted),
-              child: const Text('Interrupted'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, AttemptOutcome.restarted),
-              child: const Text('Too slow'),
-            ),
-          ],
-        ),
-      );
-      if (!mounted || choice == null || phase != Phase.playing) return;
-      outcome = choice;
+    var outcome = AttemptOutcome.interrupted;
+    if (phase == RunPhase.playing) {
+      final generation = runGeneration;
+      final choice = await confirmAbandonRun(context, keepSlowBoards: true);
+      if (!mounted ||
+          choice == null ||
+          generation != runGeneration ||
+          phase != RunPhase.playing) {
+        return;
+      }
+      outcome = choice == AbandonReason.tooSlow
+          ? AttemptOutcome.restarted
+          : AttemptOutcome.interrupted;
     }
-    runGeneration++;
-    starting = false;
-    stopClocks();
-    rememberBoard(outcome: outcome);
-    rememberRun(completed: false);
-    boardClock.stop();
-    setState(() {
-      chaseTarget = null;
-      phase = Phase.ready;
-    });
+    cancelRun(outcome: outcome);
   }
 
   void endTimedRun() {
-    if (phase != Phase.playing || !game.mode.timed) return;
+    if (phase != RunPhase.playing || !game.mode.timed) return;
     stopClocks();
-    elapsed.value = game.mode.limit!;
     rememberBoard(outcome: AttemptOutcome.timedOut);
     rememberRun(completed: true);
     boardClock.stop();
@@ -635,25 +560,15 @@ class _GameScreenState extends State<GameScreen> {
         player?.saveTimedBest(game.mode, score);
       }
       game.selected.clear();
-      phase = Phase.finished;
-      resultsInputLocked = true;
     });
-    resultsInputLockTimer?.cancel();
-    resultsInputLockTimer = Timer(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      setState(() => resultsInputLocked = false);
-    });
+    session.finish(lockInput: true, shownElapsed: game.mode.limit);
     HapticFeedback.mediumImpact();
     unawaited(submitScore(automatic: true));
   }
 
   void pick(SetCard card) {
-    if (phase != Phase.playing || starting) return;
-    final limit = game.mode.limit ?? chaseLimit;
-    if (limit != null && watch.elapsed >= limit) {
-      reachRunLimit();
-      return;
-    }
+    if (phase != RunPhase.playing || starting) return;
+    if (session.checkLimit()) return;
     setState(() {
       final attempt = [...game.selected, card.id];
       if (attempt.length == 3 && isSet(attempt.map(SetCard.new).toList())) {
@@ -694,8 +609,11 @@ class _GameScreenState extends State<GameScreen> {
           }
           final again = chaseTarget != null && !newBest;
           if (newBest) chaseTarget = null;
-          phase = again ? Phase.countdown : Phase.finished;
-          countdown = 2;
+          if (again) {
+            session.waitForRetry();
+          } else {
+            session.finish();
+          }
           HapticFeedback.mediumImpact();
           final saved = submitScore(automatic: true);
           if (again) {
@@ -714,12 +632,13 @@ class _GameScreenState extends State<GameScreen> {
 
   @override
   void dispose() {
-    stopClocks();
-    resultsInputLockTimer?.cancel();
+    session.removeListener(syncChanged);
+    session.dispose();
+    submission.removeListener(syncChanged);
+    submission.dispose();
     boardClock.dispose();
     syncService?.removeListener(syncChanged);
     syncService?.dispose();
-    elapsed.dispose();
     super.dispose();
   }
 
@@ -798,7 +717,7 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
-  bool get inRun => phase == Phase.playing || phase == Phase.countdown;
+  bool get inRun => session.active;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -810,13 +729,13 @@ class _GameScreenState extends State<GameScreen> {
             constraints: const BoxConstraints(maxWidth: 760),
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: phase == Phase.ready ? 22 : 12,
+                horizontal: phase == RunPhase.ready ? 22 : 12,
               ),
               child: Column(
                 children: [
                   Padding(
                     padding: EdgeInsets.symmetric(
-                      vertical: phase == Phase.ready ? 12 : 2,
+                      vertical: phase == RunPhase.ready ? 12 : 2,
                     ),
                     child: Row(
                       children: [
@@ -830,7 +749,7 @@ class _GameScreenState extends State<GameScreen> {
                                 Text(
                                   'trio',
                                   style: TextStyle(
-                                    fontSize: phase == Phase.ready ? 38 : 24,
+                                    fontSize: phase == RunPhase.ready ? 38 : 24,
                                     fontWeight: FontWeight.w900,
                                     letterSpacing: -2,
                                   ),
@@ -838,7 +757,7 @@ class _GameScreenState extends State<GameScreen> {
                                 Text(
                                   '.',
                                   style: TextStyle(
-                                    fontSize: phase == Phase.ready ? 38 : 24,
+                                    fontSize: phase == RunPhase.ready ? 38 : 24,
                                     fontWeight: FontWeight.w900,
                                     color: accent,
                                   ),
@@ -883,10 +802,10 @@ class _GameScreenState extends State<GameScreen> {
                   ),
                   Expanded(
                     child: switch (phase) {
-                      Phase.ready => landing(),
-                      Phase.countdown => countdownView(),
-                      Phase.playing => playing(),
-                      Phase.finished => results(),
+                      RunPhase.ready => landing(),
+                      RunPhase.countdown => countdownView(),
+                      RunPhase.playing => playing(),
+                      RunPhase.finished => results(),
                     },
                   ),
                 ],
@@ -1392,9 +1311,7 @@ class _GameScreenState extends State<GameScreen> {
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
               ),
-              onPressed: submitting
-                  ? null
-                  : () => setState(() => phase = Phase.ready),
+              onPressed: submitting ? null : session.reset,
               child: const Text('Back to start'),
             ),
           ],
@@ -1503,18 +1420,14 @@ class _GameScreenState extends State<GameScreen> {
                   : 'Practice replay. Only your first attempt can enter the leaderboard.'
             : !canSubmit
             ? 'Find at least one set to enter the high scores.'
-            : submitted
-            ? 'Score submitted as ${currentSavedScore!['name']}.'
             : submitting
             ? 'Saving your score…'
-            : currentSavedScore?['status'] == 'rejected'
-            ? 'Saved locally. Score not accepted: ${currentSavedScore!['error']}'
             : currentSavedScore != null
-            ? player!.nickname.isEmpty
-                  ? 'Saved on this device. Add a nickname to sync your high score.'
-                  : syncService?.probablyOffline == true
-                  ? 'You may be offline. Your score is saved and will sync automatically when you reconnect.'
-                  : 'Saved on this device. Your score will sync automatically.'
+            ? runScoreSyncStatus(
+                saved: currentSavedScore!,
+                player: player!,
+                sync: syncService,
+              )
             : 'First attempt. It can enter the high scores.',
         textAlign: TextAlign.center,
       ),

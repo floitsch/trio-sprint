@@ -108,7 +108,9 @@ Leaving the app does not pause the stopwatch.
   **1 min** or **3 min** race, starting after a two-second
   countdown. Each answer immediately deals a new trio: correct answers give a
   short haptic click and earn 1 point; wrong answers give a stronger haptic and
-  lose 1 point. The clock keeps running in the background. Results show your
+  lose 1 point. **Abandon** returns to the race settings without saving an
+  incomplete score; during play, confirm or choose **Keep playing**. The clock
+  keeps running while confirming and in the background. Results show your
   score and correct/wrong counts. **Difficult only** limits both
   valid and invalid trios to at most one property shared by all three cards.
   Each duration and difficulty has its own personal best and top-100 high scores.
@@ -247,8 +249,13 @@ The browser build is written to `build/web/`; serve it over HTTP rather than
 opening `index.html` directly.
 
 `lib/game.dart` contains the deck, rules, streak and solvability logic.
-`lib/card_view.dart` draws the cards, and `lib/main.dart` contains the screens,
-countdown and stopwatch.
+`lib/card_view.dart` draws the cards. `lib/main.dart` and `lib/set_quiz.dart`
+implement each game's card interactions, scoring and seed eligibility rules.
+Both use `lib/run_session.dart` for the ready/countdown/playing/results lifecycle,
+stopwatch, deadlines, resume checks and result input lock. `lib/run_scores.dart`
+shares score-save state and upload status; `lib/run_ui.dart` shares abandonment,
+seed entry/copying and leaderboard lists. Seed algorithms and score payloads
+remain versioned separately so existing replays and high scores stay compatible.
 
 ## Release
 

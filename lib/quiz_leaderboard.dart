@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'data.dart';
 import 'leaderboard.dart';
+import 'run_ui.dart';
 
 String quizDurationLabel(int seconds) =>
     seconds == 30 ? '30 s' : '${seconds ~/ 60} min';
@@ -120,52 +121,26 @@ class _QuizLeaderboardScreenState extends State<QuizLeaderboardScreen> {
                 ),
               ),
               Expanded(
-                child: FutureBuilder<List<Map<String, dynamic>>>(
+                child: RunScoreList<Map<String, dynamic>>(
                   future: scores ??= api.quizScores(
                     seconds: seconds,
                     difficult: difficult,
                     unique: unique,
                   ),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) {
-                      return Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            'Could not load scores. ${snapshot.error}',
-                            textAlign: TextAlign.center,
-                          ),
+                  buildRow: (row, i) {
+                    return ListTile(
+                      leading: Text('${i + 1}'),
+                      title: Text(row['name'] as String),
+                      subtitle: Text(
+                        '${row['correct']} correct · ${row['mistakes']} wrong',
+                      ),
+                      trailing: Text(
+                        '${row['score']}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 24,
                         ),
-                      );
-                    }
-                    if (!snapshot.hasData) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    final rows = snapshot.data!;
-                    if (rows.isEmpty) {
-                      return const Center(
-                        child: Text('No scores yet. Be the first!'),
-                      );
-                    }
-                    return ListView.builder(
-                      itemCount: rows.length,
-                      itemBuilder: (context, i) {
-                        final row = rows[i];
-                        return ListTile(
-                          leading: Text('${i + 1}'),
-                          title: Text(row['name'] as String),
-                          subtitle: Text(
-                            '${row['correct']} correct · ${row['mistakes']} wrong',
-                          ),
-                          trailing: Text(
-                            '${row['score']}',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 24,
-                            ),
-                          ),
-                        );
-                      },
+                      ),
                     );
                   },
                 ),

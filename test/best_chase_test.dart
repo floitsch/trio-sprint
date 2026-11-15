@@ -8,27 +8,7 @@ import 'package:trio_sprint/game.dart';
 import 'package:trio_sprint/main.dart';
 import 'package:trio_sprint/practice.dart';
 
-class ControlledStopwatch implements Stopwatch {
-  Duration value = Duration.zero;
-  @override
-  bool isRunning = false;
-  @override
-  Duration get elapsed => value;
-  @override
-  int get elapsedMilliseconds => value.inMilliseconds;
-  @override
-  int get elapsedMicroseconds => value.inMicroseconds;
-  @override
-  int get elapsedTicks => value.inMicroseconds;
-  @override
-  int get frequency => 1000000;
-  @override
-  void start() => isRunning = true;
-  @override
-  void stop() => isRunning = false;
-  @override
-  void reset() => value = Duration.zero;
-}
+import 'support/controlled_stopwatch.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({'best-s2': 10000}));

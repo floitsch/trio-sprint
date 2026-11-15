@@ -91,6 +91,114 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('Abandon during countdown cancels the race without saving', (
+    tester,
+  ) async {
+    final player = await PlayerData.load();
+    await tester.pumpWidget(MaterialApp(home: SetQuizScreen(player: player)));
+    await tester.tap(find.text('Start race'));
+    await tester.pump();
+    await tester.tap(find.text('Abandon'));
+    await tester.pumpAndSettle();
+    expect(find.text('Abandon this run?'), findsNothing);
+    expect(find.text('Start race'), findsOneWidget);
+    expect(find.text('Abandon'), findsNothing);
+    await tester.pump(const Duration(minutes: 4));
+    expect(find.text('Time’s up.'), findsNothing);
+    expect(find.byType(CardView), findsNothing);
+    expect(player.savedQuizScores, isEmpty);
+    expect(player.quizBest(30, false), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('abandon discards only the incomplete run and retains settings', (
+    tester,
+  ) async {
+    final player = await PlayerData.load();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SetQuizScreen(player: player, seconds: 180, difficult: true),
+      ),
+    );
+    await startRace(tester);
+    for (var i = 0; i < 2; i++) {
+      await tester.tap(find.text(isSet(cards(tester)) ? 'Yes' : 'No'));
+      await tester.pump();
+    }
+    final lateAnswer = tester
+        .widget<FilledButton>(find.widgetWithText(FilledButton, 'Yes'))
+        .onPressed!;
+    await tester.tap(find.text('Abandon'));
+    await tester.pumpAndSettle();
+    expect(find.text('Abandon this run?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Abandon').last);
+    await tester.pumpAndSettle();
+    lateAnswer();
+    await tester.pump(const Duration(minutes: 4));
+    expect(find.text('Start race'), findsOneWidget);
+    expect(player.savedQuizScores, isEmpty);
+    expect(player.quizBest(180, true), isNull);
+    expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isTrue);
+    final duration = tester.widget<SegmentedButton<Duration>>(
+      find.byType(SegmentedButton<Duration>),
+    );
+    expect(duration.selected, {const Duration(minutes: 3)});
+    await startRace(tester);
+    expect(find.text('Score: 0'), findsOneWidget);
+    await tester.tap(find.text(isSet(cards(tester)) ? 'No' : 'Yes'));
+    await tester.pump();
+    await tester.pump(const Duration(minutes: 3));
+    await tester.pump();
+    expect(find.text('0 correct · 1 wrong'), findsOneWidget);
+    expect(player.savedQuizScores.single['answers'], hasLength(1));
+    expect(player.quizBest(180, true), -1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Keep playing dismisses abandonment without pausing the race', (
+    tester,
+  ) async {
+    final player = await PlayerData.load();
+    await tester.pumpWidget(MaterialApp(home: SetQuizScreen(player: player)));
+    await startRace(tester);
+    await tester.tap(find.text(isSet(cards(tester)) ? 'Yes' : 'No'));
+    await tester.pump();
+    final current = cards(tester).map((card) => card.id).toList();
+    await tester.tap(find.text('Abandon'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 25));
+    await tester.tap(find.text('Keep playing'));
+    await tester.pumpAndSettle();
+    expect(cards(tester).map((card) => card.id), current);
+    expect(find.text('Score: 1'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump();
+    expect(find.text('Time’s up.'), findsOneWidget);
+    expect(player.savedQuizScores, hasLength(1));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('abandon confirmation cannot discard a run after its deadline', (
+    tester,
+  ) async {
+    final player = await PlayerData.load();
+    await tester.pumpWidget(MaterialApp(home: SetQuizScreen(player: player)));
+    await startRace(tester);
+    await tester.tap(find.text(isSet(cards(tester)) ? 'Yes' : 'No'));
+    await tester.pump();
+    await tester.tap(find.text('Abandon'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 30));
+    await tester.tap(find.widgetWithText(TextButton, 'Abandon').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Time’s up.'), findsOneWidget);
+    expect(find.text('1 correct · 0 wrong'), findsOneWidget);
+    expect(player.savedQuizScores, hasLength(1));
+    expect(player.quizBest(30, false), 1);
+    expect(find.text('Start race'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets(
     'results change from uploading to submitted as soon as this score is acknowledged',
     (tester) async {

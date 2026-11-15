@@ -13,6 +13,9 @@ import 'quiz_leaderboard.dart';
 import 'quiz_review.dart';
 import 'quiz_seed.dart';
 import 'sync.dart';
+import 'run_session.dart';
+import 'run_scores.dart';
+import 'run_ui.dart';
 
 class SetQuizScreen extends StatefulWidget {
   const SetQuizScreen({
@@ -35,69 +38,36 @@ class SetQuizScreen extends StatefulWidget {
   State<SetQuizScreen> createState() => _SetQuizScreenState();
 }
 
-enum _RacePhase { setup, countdown, playing, finished }
-
-class _SetQuizScreenState extends State<SetQuizScreen>
-    with WidgetsBindingObserver {
+class _SetQuizScreenState extends State<SetQuizScreen> {
   late bool difficultOnly = widget.difficult;
   late Duration limit = Duration(seconds: widget.seconds);
-  _RacePhase phase = _RacePhase.setup;
+  final session = RunSession();
+  final submission = RunScoreSubmission();
+  RunPhase get phase => session.phase;
+  int get countdown => session.countdown;
+  Duration get remaining => session.remaining ?? limit;
+  bool get resultsLocked => session.resultsLocked;
+  bool get saving => submission.busy;
+  bool get saveFailed => submission.error != null;
   SetQuizExercise? exercise;
   int correct = 0;
   int mistakes = 0;
-  int countdown = 2;
-  final watch = Stopwatch();
-  Duration remaining = const Duration(minutes: 1);
-  Timer? countdownTimer;
-  Timer? ticker;
-  Timer? deadline;
-  Timer? resultsLock;
-  bool resultsLocked = false;
   String runId = '';
   final answers = <List<Object>>[];
   List<int>? unfinishedCards;
-  bool saving = false;
-  bool saveFailed = false;
   int? previousBest;
   late QuizSeed? pendingSeed = QuizSeed.parse(widget.seed ?? '');
   QuizSeed? activeSeed;
   Random? random;
   bool practice = false;
 
-  Future<void> copySeed() async {
-    await Clipboard.setData(
-      ClipboardData(text: shareLink('quiz', activeSeed!.value)),
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Seed link copied.')));
-    }
-  }
+  Future<void> copySeed() =>
+      copyRunSeedLink(context, activeSeed!.value, parameter: 'quiz');
 
   Future<void> enterSeed() async {
-    var input = '';
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Run a seed'),
-        content: TextField(
-          onChanged: (value) => input = value,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'q1-30-n-1234abcd or a shared link',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, input),
-            child: const Text('Run seed'),
-          ),
-        ],
-      ),
+    final result = await enterRunSeed(
+      context,
+      hint: 'q1-30-n-1234abcd or a shared link',
     );
     if (!mounted || result == null) return;
     final parsed = QuizSeed.parse(result);
@@ -126,11 +96,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
   Future<void> saveResult() async {
     final player = widget.player;
     if (player == null || answers.isEmpty || practice) return;
-    setState(() {
-      saving = true;
-      saveFailed = false;
-    });
-    try {
+    await submission.save(() async {
       await player.queueQuizScore(
         id: runId,
         seconds: limit.inSeconds,
@@ -139,11 +105,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
         mistakes: mistakes,
         answers: List.of(answers),
       );
-    } catch (_) {
-      if (mounted) setState(() => saveFailed = true);
-    } finally {
-      if (mounted) setState(() => saving = false);
-    }
+    });
   }
 
   int get score => correct - mistakes;
@@ -151,7 +113,9 @@ class _SetQuizScreenState extends State<SetQuizScreen>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
+    session.addListener(runChanged);
+    session.elapsed.addListener(runChanged);
+    submission.addListener(runChanged);
     if (pendingSeed case final seed?) {
       limit = Duration(seconds: seed.seconds);
       difficultOnly = seed.difficult;
@@ -163,15 +127,29 @@ class _SetQuizScreenState extends State<SetQuizScreen>
     }
   }
 
-  void stopTimers() {
-    countdownTimer?.cancel();
-    ticker?.cancel();
-    deadline?.cancel();
-    resultsLock?.cancel();
-    watch.stop();
+  void runChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> abandon() async {
+    if (!session.active) return;
+    if (phase == RunPhase.playing) {
+      final id = runId;
+      final choice = await confirmAbandonRun(context);
+      if (!mounted ||
+          choice == null ||
+          runId != id ||
+          phase != RunPhase.playing) {
+        return;
+      }
+    }
+    exercise = null;
+    session.reset();
   }
 
   void start({String? seed}) {
+    if (saving) return;
+    submission.reset();
     final chosen =
         QuizSeed.parse(seed ?? '') ??
         pendingSeed ??
@@ -182,76 +160,38 @@ class _SetQuizScreenState extends State<SetQuizScreen>
     random = chosen.random();
     limit = Duration(seconds: chosen.seconds);
     difficultOnly = chosen.difficult;
-    stopTimers();
-    watch.reset();
+    session.stop();
     runId = randomId();
     answers.clear();
     unfinishedCards = null;
     previousBest = widget.player?.quizBest(limit.inSeconds, difficultOnly);
     setState(() {
-      phase = _RacePhase.countdown;
-      countdown = 2;
       correct = 0;
       mistakes = 0;
-      remaining = limit;
       exercise = null;
-      resultsLocked = false;
-      saveFailed = false;
     });
-    countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (countdown > 1) {
-        setState(() => countdown--);
-      } else {
-        timer.cancel();
-        setState(() {
-          exercise = SetQuizExercise(
-            difficultOnly: difficultOnly,
-            random: random,
-          );
-          phase = _RacePhase.playing;
-          watch.start();
-        });
-        deadline = Timer(limit, finish);
-        ticker = Timer.periodic(
-          const Duration(milliseconds: 100),
-          (_) => tick(),
-        );
-      }
-    });
-  }
-
-  void tick() {
-    if (phase != _RacePhase.playing) return;
-    if (watch.elapsed >= limit) {
-      finish();
-    } else {
-      setState(() => remaining = limit - watch.elapsed);
-    }
+    session.start(
+      limit: limit,
+      onPlaying: () => exercise = SetQuizExercise(
+        difficultOnly: difficultOnly,
+        random: random,
+      ),
+      onLimit: finish,
+    );
   }
 
   void finish() {
-    if (phase != _RacePhase.playing) return;
-    stopTimers();
-    setState(() {
-      unfinishedCards = exercise!.cards.map((card) => card.id).toList();
-      phase = _RacePhase.finished;
-      remaining = Duration.zero;
-      exercise = null;
-      resultsLocked = true;
-    });
+    if (phase != RunPhase.playing) return;
+    unfinishedCards = exercise!.cards.map((card) => card.id).toList();
+    exercise = null;
+    session.finish(lockInput: true, shownElapsed: limit);
     unawaited(saveResult());
-    resultsLock = Timer(const Duration(seconds: 1), () {
-      if (mounted) setState(() => resultsLocked = false);
-    });
   }
 
   void answer(bool value) {
-    if (phase != _RacePhase.playing) return;
+    if (phase != RunPhase.playing) return;
     // Reject late taps even when the deadline timer was delayed in the background.
-    if (watch.elapsed >= limit) {
-      finish();
-      return;
-    }
+    if (session.checkLimit()) return;
     answers.add([...exercise!.cards.map((card) => card.id), value]);
     final right = value == exercise!.answer;
     if (right) {
@@ -270,14 +210,12 @@ class _SetQuizScreenState extends State<SetQuizScreen>
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) tick();
-  }
-
-  @override
   void dispose() {
-    stopTimers();
-    WidgetsBinding.instance.removeObserver(this);
+    session.removeListener(runChanged);
+    session.elapsed.removeListener(runChanged);
+    session.dispose();
+    submission.removeListener(runChanged);
+    submission.dispose();
     super.dispose();
   }
 
@@ -409,28 +347,11 @@ class _SetQuizScreenState extends State<SetQuizScreen>
     );
   }
 
-  String get scoreSyncStatus {
-    final saved = widget.player?.savedQuizScore(runId);
-    if (saved?['status'] == 'synced') {
-      return 'Score submitted as ${saved!['name']}.';
-    }
-    if (saved?['status'] == 'rejected') {
-      return 'Score not accepted: ${saved!['error']}';
-    }
-    if ((saved?['name'] as String? ?? '').isEmpty &&
-        widget.player!.nickname.isEmpty) {
-      return 'Saved on this device. Add a nickname to publish your score.';
-    }
-    final sync = widget.sync;
-    if (sync != null && !sync.api.configured) {
-      return 'Saved on this device. Online scores are not configured in this build.';
-    }
-    if (sync?.busy == true) return 'Uploading score…';
-    if (sync?.error != null) {
-      return 'Upload pending. Saved on this device; retrying automatically.';
-    }
-    return 'Saved on this device. Upload pending.';
-  }
+  String get scoreSyncStatus => runScoreSyncStatus(
+    saved: widget.player!.savedQuizScore(runId)!,
+    player: widget.player!,
+    sync: widget.sync,
+  );
 
   Widget results() => ListView(
     padding: const EdgeInsets.all(22),
@@ -505,9 +426,7 @@ class _SetQuizScreenState extends State<SetQuizScreen>
         child: const Text('Race again'),
       ),
       TextButton(
-        onPressed: resultsLocked || saving
-            ? null
-            : () => setState(() => phase = _RacePhase.setup),
+        onPressed: resultsLocked || saving ? null : session.reset,
         child: const Text('Change settings'),
       ),
     ],
@@ -515,22 +434,28 @@ class _SetQuizScreenState extends State<SetQuizScreen>
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Is this a set?')),
+    appBar: AppBar(
+      title: const Text('Is this a set?'),
+      actions: [
+        if (session.active)
+          TextButton(onPressed: abandon, child: const Text('Abandon')),
+      ],
+    ),
     body: SafeArea(
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
           child: switch (phase) {
-            _RacePhase.setup => setup(),
-            _RacePhase.countdown => Center(
+            RunPhase.ready => setup(),
+            RunPhase.countdown => Center(
               child: Text(
                 '$countdown',
                 key: const ValueKey('quiz-countdown'),
                 style: Theme.of(context).textTheme.displayLarge,
               ),
             ),
-            _RacePhase.playing => playing(),
-            _RacePhase.finished =>
+            RunPhase.playing => playing(),
+            RunPhase.finished =>
               widget.sync == null
                   ? results()
                   : ListenableBuilder(

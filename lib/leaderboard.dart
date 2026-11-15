@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'data.dart';
 import 'devices.dart';
 import 'game.dart';
+import 'run_ui.dart';
 
 /// Asks for a nickname and stores it. Returns false if cancelled.
 Future<bool> editNickname(BuildContext context, PlayerData player) async {
@@ -84,55 +84,15 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     Future<List<T>> future,
     Widget Function(T row, int index) buildRow, {
     required String emptyText,
-  }) => FutureBuilder<List<T>>(
-    future: future,
-    builder: (context, snapshot) {
-      if (snapshot.hasError) {
-        return Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'Could not load scores. ${snapshot.error}',
-              textAlign: TextAlign.center,
-            ),
-          ),
-        );
-      }
-      if (!snapshot.hasData) {
-        return const Center(child: CircularProgressIndicator());
-      }
-      final rows = snapshot.data!;
-      if (rows.isEmpty) return Center(child: Text(emptyText));
-      return ListView.builder(
-        itemCount: rows.length,
-        itemBuilder: (context, index) => buildRow(rows[index], index),
-      );
-    },
-  );
+  }) =>
+      RunScoreList<T>(future: future, buildRow: buildRow, emptyText: emptyText);
 
   Future<void> chooseSeed() async {
-    final controller = TextEditingController(text: seed ?? '');
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Scores for a seed'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            hintText: 's2-1234abcd or a shared link',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Show'),
-          ),
-        ],
-      ),
+    final result = await enterRunSeed(
+      context,
+      initial: seed ?? '',
+      title: 'Scores for a seed',
+      action: 'Show',
     );
     if (!mounted || result == null) return;
     final parsed = normalizeSeed(result);
@@ -182,11 +142,7 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> {
     if (action == 'play') {
       Navigator.pop(context, rowSeed);
     } else if (action == 'copy') {
-      await Clipboard.setData(ClipboardData(text: shareLink('seed', rowSeed)));
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Seed link copied.')));
-      }
+      await copyRunSeedLink(context, rowSeed);
     }
   }
 

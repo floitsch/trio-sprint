@@ -183,7 +183,7 @@ void main() {
       expect(find.text('First time on this seed?'), findsNothing);
       expect(
         find.text(
-          'Saved on this device. Add a nickname to sync your high score.',
+          'Saved on this device. Add a nickname to publish your score.',
         ),
         findsOneWidget,
       );
