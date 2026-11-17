@@ -95,6 +95,52 @@ class Client {
   close() { this.ws.close(); }
 }
 
+test('same-room rematch requires both players and retains delays with fresh scores and cards', async () => {
+  const {room} = await (await post('/rooms', {})).json();
+  const first = new Client(room, player(), 'Alice');
+  const second = new Client(room, player(), 'Bob');
+  try {
+    await first.wait(s => s.players.length === 2);
+    await second.wait(s => s.players.length === 2);
+    first.send({type: 'handicap', milliseconds: 500});
+    await first.wait(s => s.players[s.you].handicapMs === 500);
+    first.send({type: 'ready'});
+    second.send({type: 'ready'});
+    await first.wait(s => s.board.length === 12 && s.board.every(c => c !== null));
+    first.send({type: 'pick', round: 0, cards: findSet(first.state.board)});
+    await first.wait(s => s.players[s.you].progress === 1);
+    first.send({type: 'leave'});
+    await first.wait(s => s.ended);
+    await second.wait(s => s.ended);
+    const oldSeed = first.state.seed;
+    first.send({type: 'rematch', seed: oldSeed});
+    await second.wait(s => s.players[0].rematchReady);
+    assert.equal(second.state.ended, true);
+    second.send({type: 'rematch', seed: oldSeed});
+    await first.wait(s => !s.ended);
+    await second.wait(s => !s.ended);
+    assert.equal(first.state.seed, null);
+    assert.equal(first.state.winner, null);
+    assert.deepEqual(first.state.players.map(p => p.progress), [0, 0]);
+    assert.deepEqual(first.state.players.map(p => p.mistakes), [0, 0]);
+    assert.deepEqual(first.state.players.map(p => p.rematchReady), [false, false]);
+    assert.deepEqual(first.state.players.map(p => p.handicapMs), [500, 0]);
+    assert.equal(first.state.round, 0);
+    assert.deepEqual(first.state.board, []);
+    await first.wait(s => s.board.length === 12 && s.board.every(c => c !== null));
+    await second.wait(s => s.board.length === 12);
+    assert.deepEqual(first.state.board, second.state.board);
+    second.send({type: 'leave'});
+    await first.wait(s => s.ended);
+    assert.notEqual(first.state.seed, oldSeed);
+    first.send({type: 'rematch', seed: oldSeed});
+    second.send({type: 'rematch', seed: oldSeed});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(first.state.ended, true);
+    assert.deepEqual(first.state.players.map(p => p.rematchReady), [false, false]);
+  } finally { first.close(); second.close(); }
+});
+
 test('shared game: countdown, shared replacements, validation, reconnect and winner', async () => {
   const {room} = await (await post('/rooms', {})).json();
   const id = player();
@@ -162,7 +208,7 @@ test('leaving a started race forfeits it', async () => {
   } finally { first.close(); second.close(); }
 });
 
-test('handicap withholds opening and replacement cards, rejects early picks and survives reconnect', async () => {
+test('handicap delays validation, survives reconnect, and loses to an earlier opponent claim', async () => {
   const {room} = await (await post('/rooms', {})).json();
   const id = player();
   const first = new Client(room, id, 'Fast');
@@ -171,52 +217,41 @@ test('handicap withholds opening and replacement cards, rejects early picks and 
   try {
     await first.wait(s => s.players.length === 2);
     await second.wait(s => s.players.length === 2);
-    first.send({type: 'benchmark', medianMs: 2000, sampleCount: 10});
-    second.send({type: 'benchmark', medianMs: 3200, sampleCount: 10});
-    await second.wait(s => s.players.every(p => p.medianMs > 0));
-    first.send({type: 'ready'});
-    await first.wait(s => s.players[s.you].ready);
     first.send({type: 'handicap', milliseconds: 1200});
-    await first.wait(s => s.players[s.you].handicapMs === 1200 && s.players.every(p => !p.ready));
+    await first.wait(s => s.players[s.you].handicapMs === 1200);
     first.send({type: 'ready'});
     second.send({type: 'ready'});
+    await first.wait(s => s.board.length === 12);
     await second.wait(s => s.board.length === 12);
-    await first.wait(s => s.board.length === 12 && s.board.every(c => c === null));
-    assert.equal(first.state.seed, null);
-    const starting = [...second.state.board];
+    assert.deepEqual(first.state.board, second.state.board);
+    assert.ok(first.state.board.every(c => c !== null));
+    const starting = [...first.state.board];
     first.send({type: 'pick', round: 0, cards: findSet(starting)});
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await first.wait(s => s.validationAt !== null);
+    const validationAt = first.state.validationAt;
     assert.equal(first.state.players[first.state.you].progress, 0);
-    await first.wait(s => s.board.length === 12 && s.board.every(c => c !== null));
-    first.send({type: 'handicap', milliseconds: 0});
-    first.send({type: 'pick', round: 0, cards: findSet(starting)});
-    await first.wait(s => s.players[s.you].progress === 1);
-    const masked = [...first.state.board];
-    assert.equal(masked.filter(c => c === null).length, 3);
-    assert.equal(first.state.players[first.state.you].handicapMs, 1200);
-    const revealAt = first.state.revealAt;
+    assert.deepEqual(first.state.board, starting);
     first.close();
     reconnect = new Client(room, id, 'Fast');
+    await reconnect.wait(s => s.validationAt === validationAt);
     await reconnect.wait(s => s.players[s.you].progress === 1);
-    assert.equal(reconnect.state.revealAt, revealAt);
-    assert.deepEqual(reconnect.state.board, masked);
-    await reconnect.wait(s => s.board.every(c => c !== null));
-    for (let i = 0; i < masked.length; i++) {
-      if (masked[i] !== null) assert.equal(reconnect.state.board[i], masked[i]);
-    }
-    // An opponent's claim also masks the delayed player's replacement cards.
+    assert.ok(Date.now() >= validationAt);
+    assert.equal(reconnect.state.validationAt, null);
+    assert.ok(reconnect.state.board.every(c => c !== null));
     await second.wait(s => s.round === 1);
+    reconnect.send({type: 'pick', round: 1, cards: findSet(reconnect.state.board)});
+    await reconnect.wait(s => s.validationAt !== null);
     second.send({type: 'pick', round: 1, cards: findSet(second.state.board)});
-    await reconnect.wait(s => s.round === 2 && s.board.includes(null));
-    await second.wait(s => s.round === 2);
+    await reconnect.wait(s => s.round === 2);
+    assert.equal(reconnect.state.validationAt, null);
+    await new Promise(resolve => setTimeout(resolve, 1300));
     assert.equal(reconnect.state.players[reconnect.state.you].progress, 1);
-    assert.equal(second.state.players[second.state.you].progress, 1);
-    assert.equal(reconnect.state.board.filter(c => c === null).length, 3);
-    reconnect.send({type: 'pick', round: 2, cards: findSet(second.state.board)});
-    await new Promise(resolve => setTimeout(resolve, 100));
-    assert.equal(reconnect.state.round, 2);
-    reconnect.send({type: 'leave'});
-    await second.wait(s => s.ended);
+    assert.equal(reconnect.state.players[1 - reconnect.state.you].progress, 1);
+    reconnect.send({type: 'pick', round: 2, cards: [0, 0, 0]});
+    await reconnect.wait(s => s.validationAt !== null);
+    assert.equal(reconnect.state.players[reconnect.state.you].mistakes, 0);
+    await reconnect.wait(s => s.players[s.you].mistakes === 1);
+    assert.equal(reconnect.state.validationAt, null);
   } finally { first.close(); second.close(); reconnect?.close(); }
 });
 

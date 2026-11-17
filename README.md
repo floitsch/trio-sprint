@@ -156,11 +156,14 @@ Leaving the app does not pause the stopwatch.
   board are ignored, so simultaneous claims cannot score twice. Reconnecting
   on the same device restores the current board and score. Rooms already open
   before this change retain their original independent-board rules.
-  Before readying, each player can set their own **card delay** in 0.1-second
-  steps (0–30 seconds). It applies to the opening deal and each new replacement;
-  unchanged cards stay visible, and selections resume when the full board is
-  revealed. The server withholds new card identities and rejects early claims,
-  including across reconnects. Changing a delay resets both players' readiness.
+  The board fills the available play area, with compact scores above it.
+  After a game, both players choose **Play again** to start a fresh seeded game
+  in the same room, keeping their names and delays. Your saved nickname is reused.
+  Before readying, each player can set their own **answer delay** in 0.1-second
+  steps (0–30 seconds). All cards remain visible. A submitted trio is checked and
+  scored only after the delay, including across reconnects. If the other player
+  claims first, the pending answer for the old board is discarded. Changing a
+  delay resets both players' readiness.
   With at least five unassisted full-board solves each, a suggested delay is the
   positive difference between the players' recent median solving times (up to
   100 solves each; excludes replays and training reviews). It is a starting

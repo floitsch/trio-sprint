@@ -1,6 +1,6 @@
 // Copyright (C) 2026 Florian Loitsch.
 import {saveQuizScore, quizScoreQuery} from './quiz_scores.js';
-import { validHandicap, visibleBoard, delayBoard } from './handicap.js';
+import { validHandicap } from './handicap.js';
 import { validAttempts, saveAttempts } from './attempts.js';
 import { savePlayerName, totalSetsQuery } from './set_totals.js';
 import { DurableObject } from 'cloudflare:workers';
@@ -144,7 +144,7 @@ export class RaceRoom extends DurableObject {
   async schedule() {
     const now = Date.now();
     const times = [this.game.expires, this.game.startAt,
-      ...this.game.players.map(p => p.revealAt)].filter(t => t > now);
+      ...this.game.players.map(p => p.pendingPick?.dueAt).filter(Boolean).map(t => Math.max(t, now + 1))].filter(t => t > now);
     await this.ctx.storage.setAlarm(Math.min(...times));
   }
   connected(token) {
@@ -176,8 +176,33 @@ export class RaceRoom extends DurableObject {
     const pair = new WebSocketPair();
     this.ctx.acceptWebSocket(pair[1], [token]);
     pair[1].serializeAttachment({ token });
+    if (this.startRematchIfReady()) {
+      await this.save();
+      await this.schedule();
+    }
     this.broadcast();
     return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+  startRematchIfReady() {
+    if (!this.game.ended || this.game.players.length !== 2 ||
+        !this.game.players.every(p => p.rematchReady && this.connected(p.token))) return false;
+    this.game.seed = 's2-' + crypto.getRandomValues(new Uint32Array(1))[0].toString(16).padStart(8, '0');
+    this.game.solutions = [];
+    this.game.winner = null;
+    this.game.ended = false;
+    this.game.startAt = Date.now() + 3000;
+    this.game.expires = Date.now() + 3600000;
+    for (const p of this.game.players) {
+      p.progress = 0;
+      p.mistakes = 0;
+      p.solutions = [];
+      p.ready = true;
+      p.rematchReady = false;
+      p.hidden = [];
+      p.revealAt = null;
+      p.pendingPick = null;
+    }
+    return true;
   }
   runFor(player) {
     const shared = this.game.mode === 'shared';
@@ -204,11 +229,11 @@ export class RaceRoom extends DurableObject {
       round: game.mode === 'shared' ? game.solutions.length : own?.progress ?? 0,
       winner: game.winner, you: game.players.indexOf(own),
       seed: game.ended ? game.seed : null,
-      revealAt: own?.revealAt ?? null,
-      board: started && !game.ended ? visibleBoard(this.runFor(own).board, own, Date.now()) : [],
+      validationAt: own?.pendingPick?.dueAt ?? null,
+      board: started && !game.ended ? this.runFor(own).board : [],
       players: game.players.map(p => ({ name: p.name, progress: p.progress, mistakes: p.mistakes,
         handicapMs: p.handicapMs ?? 0, medianMs: p.medianMs ?? null, sampleCount: p.sampleCount ?? 0,
-        ready: p.ready, connected: this.connected(p.token) })),
+        ready: p.ready, rematchReady: p.rematchReady ?? false, connected: this.connected(p.token) })),
     };
   }
   broadcast() {
@@ -216,15 +241,59 @@ export class RaceRoom extends DurableObject {
       try { socket.send(JSON.stringify(this.state(socket.deserializeAttachment().token))); } catch (_) { /* closed */ }
     }
   }
+  validatePick(player, data) {
+    const shared = this.game.mode === 'shared';
+    const round = shared ? this.game.solutions.length : player.progress;
+    if (data.round !== round || this.game.ended) return;
+    const run = this.runFor(player);
+    if (run.pick(data.cards)) {
+      if (shared) {
+        this.game.solutions.push(data.cards);
+        for (const p of this.game.players) p.pendingPick = null;
+      }
+      (player.solutions ??= []).push(data.cards);
+      player.progress++;
+      if (player.progress === 5) {
+        this.game.ended = true;
+        this.game.winner = this.game.players.indexOf(player);
+        for (const p of this.game.players) p.pendingPick = null;
+      }
+    } else {
+      player.mistakes++;
+      for (const socket of this.ctx.getWebSockets(player.token)) {
+        try { socket.send(JSON.stringify({type: 'error', message: 'Not a set. Try again.'})); } catch (_) { /* Closed. */ }
+      }
+    }
+  }
+  validateDuePicks() {
+    const due = this.game.players.filter(p => p.pendingPick?.dueAt <= Date.now())
+      .sort((a, b) => a.pendingPick.dueAt - b.pendingPick.dueAt);
+    for (const p of due) {
+      const pick = p.pendingPick;
+      p.pendingPick = null;
+      if (pick) this.validatePick(p, pick);
+    }
+  }
   async webSocketMessage(socket, message) {
     if (typeof message !== 'string' || message.length > 2048) return;
     let data;
     try { data = JSON.parse(message); } catch (_) { return; }
-    if (!data || typeof data !== 'object' || !this.game || this.game.ended) return;
+    if (!data || typeof data !== 'object' || !this.game) return;
     if (Date.now() >= this.game.expires) { await this.alarm(); return; }
     const token = socket.deserializeAttachment().token;
     const player = this.game.players.find(p => p.token === token);
     if (!player) return;
+    if (this.game.ended) {
+      if (data.type !== 'rematch' || data.seed !== this.game.seed) return;
+      player.rematchReady = true;
+      this.startRematchIfReady();
+      await this.save();
+      await this.schedule();
+      this.broadcast();
+      return;
+    }
+    this.validateDuePicks();
+    if (this.game.ended) { await this.save(); this.broadcast(); return; }
     if (data.type === 'handicap' && !this.game.startAt) {
       if (!validHandicap(data.milliseconds)) return;
       player.handicapMs = data.milliseconds;
@@ -241,38 +310,24 @@ export class RaceRoom extends DurableObject {
       if (this.game.players.length === 2 && this.game.players.every(p => p.ready && this.connected(p.token))) {
         this.game.startAt = Date.now() + 3000;
         for (const p of this.game.players) {
-          delayBoard(p, [], this.runFor(p).board, this.game.startAt);
+          p.pendingPick = null;
         }
         await this.schedule();
       }
     } else if (data.type === 'pick' && this.game.startAt && Date.now() >= this.game.startAt) {
-      if (Date.now() < (player.revealAt ?? 0)) return;
-      const shared = this.game.mode === 'shared';
-      const round = shared ? this.game.solutions.length : player.progress;
+      if (player.pendingPick) return;
+      const round = this.game.mode === 'shared' ? this.game.solutions.length : player.progress;
       if (data.round !== round) { this.broadcast(); return; }
-      const run = this.runFor(player);
-      const before = [...run.board];
-      if (run.pick(data.cards)) {
-        if (shared) {
-          this.game.solutions.push(data.cards);
-          for (const p of this.game.players) delayBoard(p, before, run.board, Date.now());
-        } else {
-          delayBoard(player, before, run.board, Date.now());
-        }
-        (player.solutions ??= []).push(data.cards);
-        player.progress++;
-        if (player.progress === 5) {
-          this.game.ended = true;
-          this.game.winner = this.game.players.indexOf(player);
-        }
+      if (player.handicapMs > 0) {
+        player.pendingPick = {round: data.round, cards: data.cards, dueAt: Date.now() + player.handicapMs};
       } else {
-        player.mistakes++;
-        socket.send(JSON.stringify({ type: 'error', message: 'Not a set. Try again.' }));
+        this.validatePick(player, data);
       }
     } else if (data.type === 'leave') {
       if (this.game.startAt) {
         this.game.ended = true;
         this.game.winner = this.game.players.findIndex(p => p !== player);
+        for (const p of this.game.players) p.pendingPick = null;
       } else {
         this.game.players = this.game.players.filter(p => p !== player);
         socket.close(1000, 'Left room');
@@ -295,6 +350,8 @@ export class RaceRoom extends DurableObject {
       await this.ctx.storage.deleteAll();
       this.game = undefined;
     } else {
+      this.validateDuePicks();
+      await this.save();
       this.broadcast();
       await this.schedule();
     }

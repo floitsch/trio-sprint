@@ -328,6 +328,7 @@ class _GameScreenState extends State<GameScreen> {
       message('Device storage is needed for online play.');
       return false;
     }
+    if (player!.nickname.isNotEmpty) return true;
     return await editNickname(context, player!) && mounted;
   }
 

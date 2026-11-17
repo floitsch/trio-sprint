@@ -5,20 +5,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import 'card_view.dart';
+import 'race_board.dart';
 import 'data.dart';
 import 'game.dart';
 import 'practice.dart';
 
 class RaceScreen extends StatefulWidget {
-  const RaceScreen({super.key, required this.player, this.room});
+  const RaceScreen({
+    super.key,
+    required this.player,
+    this.room,
+    this.connectChannel,
+    this.api,
+  });
   final PlayerData player;
   final String? room;
+  final WebSocketChannel Function(Uri uri)? connectChannel;
+  final OnlineApi? api;
   @override
   State<RaceScreen> createState() => _RaceScreenState();
 }
 
 class _RaceScreenState extends State<RaceScreen> {
+  late final api = widget.api ?? OnlineApi();
   String? room;
   WebSocketChannel? channel;
   StreamSubscription<dynamic>? subscription;
@@ -99,7 +108,7 @@ class _RaceScreenState extends State<RaceScreen> {
       feedback = '';
     });
     try {
-      final result = await OnlineApi().request('/rooms', body: {});
+      final result = await api.request('/rooms', body: {});
       if (!mounted) return;
       room = result['room'] as String;
       await connect();
@@ -123,11 +132,11 @@ class _RaceScreenState extends State<RaceScreen> {
     await subscription?.cancel();
     await channel?.sink.close();
     try {
-      final apiUri = OnlineApi().uri('/rooms/$room', {
+      final apiUri = api.uri('/rooms/$room', {
         'player': widget.player.player,
         'name': widget.player.nickname,
       });
-      final next = WebSocketChannel.connect(
+      final next = (widget.connectChannel ?? WebSocketChannel.connect)(
         apiUri.replace(scheme: apiUri.scheme == 'https' ? 'wss' : 'ws'),
       );
       channel = next;
@@ -143,6 +152,8 @@ class _RaceScreenState extends State<RaceScreen> {
                 recordedSeed = seed;
                 widget.player.claimSeed(seed).catchError((_) => false);
               }
+              final newGame =
+                  state?['ended'] == true && message['ended'] != true;
               final oldProgress = ownProgress;
               final oldRound = boardRound;
               final nextYou = message['you'] as int? ?? -1;
@@ -151,7 +162,11 @@ class _RaceScreenState extends State<RaceScreen> {
                   ? 0
                   : nextPlayers[nextYou]['progress'] as int;
               final nextRound = message['round'] as int? ?? nextProgress;
-              if (nextProgress > oldProgress) {
+              if (newGame) {
+                selected.clear();
+                pendingSolution = [];
+                feedback = '';
+              } else if (nextProgress > oldProgress) {
                 rememberBoard();
                 feedback = 'You claimed a set!';
               } else if (nextRound != oldRound) {
@@ -162,6 +177,7 @@ class _RaceScreenState extends State<RaceScreen> {
                 rememberBoard(outcome: AttemptOutcome.interrupted);
                 boardClock.stop();
               }
+              final awaitingValidation = message['validationAt'] != null;
               state = message;
               clockOffset =
                   (message['now'] as int) -
@@ -169,11 +185,11 @@ class _RaceScreenState extends State<RaceScreen> {
               syncPracticeClock();
               if (oldRound != boardRound ||
                   oldProgress != ownProgress ||
-                  waiting ||
+                  (waiting && !awaitingValidation) ||
                   message['ended'] == true) {
                 selected.clear();
               }
-              waiting = false;
+              waiting = awaitingValidation;
             } else if (message['type'] == 'error') {
               feedback = message['message'] as String;
               selected.clear();
@@ -280,7 +296,7 @@ class _RaceScreenState extends State<RaceScreen> {
     final delay = (own['handicapMs'] as num? ?? 0).toDouble();
     return Column(
       children: [
-        Text('Your card delay: ${(delay / 1000).toStringAsFixed(1)} s'),
+        Text('Your answer delay: ${(delay / 1000).toStringAsFixed(1)} s'),
         Slider(
           value: delay,
           min: 0,
@@ -304,7 +320,7 @@ class _RaceScreenState extends State<RaceScreen> {
               : 'Based on your recent median ${(mine! / 1000).toStringAsFixed(1)} s and your friend’s ${(theirs! / 1000).toStringAsFixed(1)} s (up to 100 solves each).',
         ),
         const Text(
-          'Delay applies to the opening deal and each replacement. Changing it resets both players’ readiness.',
+          'Cards stay visible. Each submitted answer is checked after your delay. Changing it resets both players’ readiness.',
         ),
       ],
     );
@@ -337,210 +353,178 @@ class _RaceScreenState extends State<RaceScreen> {
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 760),
-            child: ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                Text(
-                  state?['mode'] == 'race'
-                      ? 'Same seeded deck. First to five sets wins. Leaving a started race forfeits it.'
-                      : 'Shared board. Claim a set to earn a point and replace its cards for both players. First to five wins. Leaving forfeits the game.',
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                if (room == null) ...[
-                  FilledButton(
-                    onPressed: connecting ? null : create,
-                    child: const Text('Create room'),
-                  ),
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: code,
-                    textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      labelText: 'Room code or shared link',
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: connecting
-                        ? null
-                        : () {
-                            final raw = code.text.trim();
-                            final value =
-                                (Uri.tryParse(raw)?.queryParameters['room'] ??
-                                        raw)
-                                    .toUpperCase();
-                            if (!RegExp(r'^[A-Z0-9]{6}$').hasMatch(value)) {
-                              setState(
-                                () => feedback =
-                                    'Enter a six-character room code.',
-                              );
-                              return;
-                            }
-                            room = value;
-                            connect();
-                          },
-                    child: const Text('Join room'),
-                  ),
-                ] else ...[
-                  Text(
-                    'Room $room',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () async {
-                      await Clipboard.setData(
-                        ClipboardData(text: shareLink('room', room!)),
-                      );
-                      if (mounted) {
-                        setState(() => feedback = 'Invite link copied.');
-                      }
-                    },
-                    child: const Text('Copy invite link'),
-                  ),
-                  for (var i = 0; i < players.length; i++)
-                    ListTile(
-                      title: Text(
-                        '${players[i]['name']}${i == you ? ' (you)' : ''}',
-                      ),
-                      subtitle: Text(
-                        players[i]['connected'] != true
-                            ? 'Disconnected'
-                            : players[i]['ready'] == true
-                            ? 'Ready'
-                            : 'Getting ready',
-                      ),
-                      trailing: Text(
-                        '${players[i]['progress']} / 5 · ${((players[i]['handicapMs'] as num? ?? 0) / 1000).toStringAsFixed(1)} s delay',
-                      ),
-                    ),
-                  if (connected && !ended && startAt == null && you >= 0)
-                    handicapControls(),
-                  if (connected && !ended && startAt == null)
-                    FilledButton(
-                      onPressed: you < 0 || players[you]['ready'] == true
-                          ? null
-                          : () => send({'type': 'ready'}),
-                      child: Text(
-                        players.length < 2
-                            ? 'Ready — waiting for friend'
-                            : 'Ready',
-                      ),
-                    ),
-                  if (remaining > 0 && !ended)
-                    Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        '$remaining',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 80, color: accent),
-                      ),
-                    ),
-                  if (ended) ...[
-                    Semantics(
-                      key: const ValueKey('race-result'),
-                      container: true,
-                      liveRegion: true,
-                      label: state?['winner'] == you
-                          ? 'You win!'
-                          : 'Your friend wins!',
-                      excludeSemantics: true,
-                      child: Text(
-                        state?['winner'] == you
-                            ? 'You win!'
-                            : 'Your friend wins!',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
+            child: startAt != null && !ended
+                ? RaceBoard(
+                    board: board.cast<int>(),
+                    players: players,
+                    you: you,
+                    selected: selected,
+                    onPick: pick,
+                    countdown: remaining,
+                    feedback: waiting ? 'Checking answer…' : feedback,
+                    onReconnect: !connected && !connecting ? connect : null,
+                  )
+                : ListView(
+                    padding: const EdgeInsets.all(20),
+                    children: [
+                      if (!ended)
+                        Text(
+                          state?['mode'] == 'race'
+                              ? 'Same seeded deck. First to five sets wins. Leaving a started race forfeits it.'
+                              : 'Shared board. Claim a set to earn a point and replace its cards for both players. First to five wins. Leaving forfeits the game.',
+                          textAlign: TextAlign.center,
                         ),
-                      ),
-                    ),
-                    const Text(
-                      'Race results are separate from solo high scores.',
-                      textAlign: TextAlign.center,
-                    ),
-                    FilledButton(
-                      onPressed: () async {
-                        await subscription?.cancel();
-                        await channel?.sink.close();
-                        setState(() {
-                          state = null;
-                          room = null;
-                          connected = false;
-                        });
-                      },
-                      child: const Text('Another race'),
-                    ),
-                  ],
-                  if (!connected && !connecting)
-                    TextButton(
-                      onPressed: connect,
-                      child: const Text('Reconnect'),
-                    ),
-                  if (board.contains(null) && !ended && remaining <= 0)
-                    Text(
-                      'New cards in ${(((state?['revealAt'] as int? ?? 0) - DateTime.now().millisecondsSinceEpoch - clockOffset) / 1000).clamp(0, 30).toStringAsFixed(1)} s',
-                      textAlign: TextAlign.center,
-                    ),
-                  if (board.isNotEmpty && !ended && remaining <= 0)
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        final columns = constraints.maxWidth > 500 ? 4 : 3;
-                        final rows = (board.length / columns).ceil();
-                        final availableHeight =
-                            (MediaQuery.sizeOf(context).height - 350).clamp(
-                              260.0,
-                              650.0,
-                            );
-                        final cardHeight =
-                            (availableHeight - (rows - 1) * 10) / rows;
-                        final width =
-                            (columns * cardHeight * 2 / 3 + (columns - 1) * 10)
-                                .clamp(0.0, constraints.maxWidth);
-                        return Center(
-                          child: SizedBox(
-                            width: width,
-                            child: GridView.count(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              crossAxisCount: columns,
-                              childAspectRatio: 2 / 3,
-                              crossAxisSpacing: 10,
-                              mainAxisSpacing: 10,
-                              children: [
-                                for (final id in board)
-                                  if (id == null)
-                                    const Card(
-                                      child: Center(
-                                        child: Icon(Icons.hourglass_empty),
-                                      ),
-                                    )
-                                  else
-                                    CardView(
-                                      card: SetCard(id as int),
-                                      selected: selected.contains(id),
-                                      onTap: () => pick(id),
-                                    ),
-                              ],
+                      const SizedBox(height: 16),
+                      if (room == null) ...[
+                        FilledButton(
+                          onPressed: connecting ? null : create,
+                          child: const Text('Create room'),
+                        ),
+                        const SizedBox(height: 20),
+                        TextField(
+                          controller: code,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: const InputDecoration(
+                            labelText: 'Room code or shared link',
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: connecting
+                              ? null
+                              : () {
+                                  final raw = code.text.trim();
+                                  final value =
+                                      (Uri.tryParse(raw)
+                                                  ?.queryParameters['room'] ??
+                                              raw)
+                                          .toUpperCase();
+                                  if (!RegExp(r'^[A-Z0-9]{6}$')
+                                      .hasMatch(value)) {
+                                    setState(
+                                      () => feedback =
+                                          'Enter a six-character room code.',
+                                    );
+                                    return;
+                                  }
+                                  room = value;
+                                  connect();
+                                },
+                          child: const Text('Join room'),
+                        ),
+                      ] else ...[
+                        Text(
+                          'Room $room',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        if (!ended)
+                          TextButton(
+                            onPressed: () async {
+                              await Clipboard.setData(
+                                ClipboardData(text: shareLink('room', room!)),
+                              );
+                              if (mounted) {
+                                setState(
+                                  () => feedback = 'Invite link copied.',
+                                );
+                              }
+                            },
+                            child: const Text('Copy invite link'),
+                          ),
+                        if (ended) ...[
+                          Semantics(
+                            key: const ValueKey('race-result'),
+                            container: true,
+                            liveRegion: true,
+                            label: state?['winner'] == you
+                                ? 'You win!'
+                                : 'Your friend wins!',
+                            excludeSemantics: true,
+                            child: Text(
+                              state?['winner'] == you
+                                  ? 'You win!'
+                                  : 'Your friend wins!',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 32,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
-                        );
-                      },
-                    ),
-                ],
-                if (connecting)
-                  const Center(child: CircularProgressIndicator()),
-                if (feedback.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(feedback, textAlign: TextAlign.center),
+                          const Text(
+                            'Race results are separate from solo high scores.',
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed:
+                                !connected ||
+                                    you < 0 ||
+                                    players[you]['rematchReady'] == true
+                                ? null
+                                : () => send({
+                                    'type': 'rematch',
+                                    'seed': state!['seed'],
+                                  }),
+                            icon: const Icon(Icons.refresh),
+                            label: Text(
+                              you >= 0 && players[you]['rematchReady'] == true
+                                  ? 'Waiting for friend…'
+                                  : 'Play again',
+                            ),
+                          ),
+                          const Text(
+                            'Both players choose Play again. Same room, fresh cards and the same delays.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                        for (var i = 0; i < players.length; i++)
+                          ListTile(
+                            title: Text(
+                              '${players[i]['name']}${i == you ? ' (you)' : ''}',
+                            ),
+                            subtitle: Text(
+                              players[i]['connected'] != true
+                                  ? 'Disconnected'
+                                  : players[i]['ready'] == true
+                                  ? 'Ready'
+                                  : 'Getting ready',
+                            ),
+                            trailing: Text(
+                              '${players[i]['progress']} / 5 · ${((players[i]['handicapMs'] as num? ?? 0) / 1000).toStringAsFixed(1)} s delay',
+                            ),
+                          ),
+                        if (connected && !ended && startAt == null && you >= 0)
+                          handicapControls(),
+                        if (connected && !ended && startAt == null)
+                          FilledButton(
+                            onPressed: you < 0 || players[you]['ready'] == true
+                                ? null
+                                : () => send({'type': 'ready'}),
+                            child: Text(
+                              players.length < 2
+                                  ? 'Ready — waiting for friend'
+                                  : 'Ready',
+                            ),
+                          ),
+                        if (!connected && !connecting)
+                          TextButton(
+                            onPressed: connect,
+                            child: const Text('Reconnect'),
+                          ),
+                      ],
+                      if (connecting)
+                        const Center(child: CircularProgressIndicator()),
+                      if (feedback.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(feedback, textAlign: TextAlign.center),
+                        ),
+                    ],
                   ),
-              ],
-            ),
           ),
         ),
       ),
